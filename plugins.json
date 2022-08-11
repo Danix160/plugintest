@@ -1,0 +1,43 @@
+[
+    {
+        "iconUrl": "https://upload.wikimedia.org/wikipedia/commons/2/2f/Korduene_Logo.png",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/Danix160/plugintest",
+        "fileSize": 7311,
+        "status": 1,
+        "language": "en",
+        "authors": [
+            "Cloudburst",
+            "Luna712"
+        ],
+        "tvTypes": [
+            "Movie"
+        ],
+        "version": 1,
+        "internalName": "ExampleProvider",
+        "description": "Lorem ipsum",
+        "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/ExampleProvider.cs3",
+        "name": "ExampleProvider"
+    },
+    {
+        "iconUrl": "https://toonitalia.xyz/wp-content/uploads/2023/08/cropped-Majintoon-192x192.jpg",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/Danix160/plugintest",
+        "status": 1,
+        "language": "it",
+        "authors": [
+            "Danix"
+        ],
+        "tvTypes": [
+            "Movie",
+            "TvSeries",
+            "Anime",
+            "Cartoon"
+        ],
+        "version": 1,
+        "internalName": "ToonItaliaProvider",
+        "description": "Archivio di Anime e Cartoni animati in italiano da ToonItalia.xyz",
+        "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/ToonItaliaProvider.cs3",
+        "name": "ToonItaliaProvider"
+    }
+]
