@@ -6,7 +6,7 @@ cloudstream {
 
     status = 1
     tvTypes = listOf(
-       Movie, TvSeries, Anime, Cartoon
+       "Movie", "TvSeries", "Anime", "Cartoon"
     )
 
     requiresResources = false
