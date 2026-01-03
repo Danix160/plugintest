@@ -8,41 +8,41 @@ import org.jsoup.nodes.Element
 class ToonItaliaProvider : MainAPI() {
     override var mainUrl = "https://toonitalia.xyz"
     override var name = "Toon Italia"
-    override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime, TvType.Cartoon)
-    override var lang = "it"
     override val hasMainPage = true
+    override var lang = "it"
+    override val supportedTypes = setOf(
+        TvType.Contents,
+        TvType.TvSeries,
+        TvType.Anime,
+        TvType.Movie
+    )
 
-    //Homepage
-override suspend fun getMainPage(
+    override suspend fun getMainPage(
         page: Int,
         request: HomePageRequest
     ): HomePageResponse {
-        // Carichiamo la home page per estrarre i widget
         val document = app.get(mainUrl).document
         val homePageLists = mutableListOf<HomePageList>()
 
-        // Selezioniamo tutti i widget che contengono liste di post (Updates, Anime, Serie TV, ecc.)
+        // 1. Sezioni classiche dai widget (Updates, Anime, Serie TV)
         document.select("div.rpwwt-widget").forEach { widget ->
             val title = widget.selectFirst("h2.widget-title")?.text()?.trim() ?: "Altro"
-            
             val items = widget.select("ul li").mapNotNull { li ->
                 val a = li.selectFirst("a") ?: return@mapNotNull null
                 val href = a.attr("href")
                 val name = li.selectFirst("span.rpwwt-post-title")?.text() ?: a.text()
                 val posterUrl = li.selectFirst("img")?.attr("src")
 
-                // Creiamo l'oggetto risposta per la home
                 newTvSeriesSearchResponse(name, href, TvType.TvSeries) {
                     this.posterUrl = posterUrl
                 }
             }
-
             if (items.isNotEmpty()) {
                 homePageLists.add(HomePageList(title, items))
             }
         }
 
-        // Aggiungiamo anche la sezione "I Più Visti" se presente (ha una struttura leggermente diversa)
+        // 2. Sezione "I Più Visti"
         document.select("div.widget_post_views_counter_list_widget").forEach { widget ->
             val title = widget.selectFirst("h2.widget-title")?.text()?.trim() ?: "I Più Visti"
             val items = widget.select("ol li").mapNotNull { li ->
@@ -63,18 +63,17 @@ override suspend fun getMainPage(
         return HomePageResponse(homePageLists)
     }
 
-//SEARCH
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/?s=$query"
         val document = app.get(url).document
 
-        return document.select("article").mapNotNull { article ->
-            val titleHeader = article.selectFirst("h2.entry-title a") ?: return@mapNotNull null
-            val title = titleHeader.text()
+        return document.select("article").mapNotNull {
+            val titleHeader = it.selectFirst("h2.entry-title a") ?: return@mapNotNull null
+            val name = titleHeader.text()
             val href = titleHeader.attr("href")
-            val posterUrl = article.selectFirst("img")?.attr("src")
+            val posterUrl = it.selectFirst("img")?.attr("src")
 
-            newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
+            newTvSeriesSearchResponse(name, href, TvType.TvSeries) {
                 this.posterUrl = posterUrl
             }
         }
@@ -106,7 +105,7 @@ override suspend fun getMainPage(
         contentLinks.forEach { a ->
             val href = a.attr("href")
             val text = a.text().trim()
-            val isVideoHost = listOf("voe", "vidhide", "chuckle-tube", "mixdrop", "streamtape").any { 
+            val isVideoHost = listOf("voe", "vidhide", "chuckle-tube", "mixdrop", "streamtape", "streamup").any { 
                 href.contains(it) || text.contains(it, ignoreCase = true) 
             }
             
