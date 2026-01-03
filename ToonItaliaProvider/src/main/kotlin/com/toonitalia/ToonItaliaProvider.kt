@@ -12,6 +12,58 @@ class ToonItaliaProvider : MainAPI() {
     override var lang = "it"
     override val hasMainPage = true
 
+    //Homepage
+override suspend fun getMainPage(
+        page: Int,
+        request: HomePageRequest
+    ): HomePageResponse {
+        // Carichiamo la home page per estrarre i widget
+        val document = app.get(mainUrl).document
+        val homePageLists = mutableListOf<HomePageList>()
+
+        // Selezioniamo tutti i widget che contengono liste di post (Updates, Anime, Serie TV, ecc.)
+        document.select("div.rpwwt-widget").forEach { widget ->
+            val title = widget.selectFirst("h2.widget-title")?.text()?.trim() ?: "Altro"
+            
+            val items = widget.select("ul li").mapNotNull { li ->
+                val a = li.selectFirst("a") ?: return@mapNotNull null
+                val href = a.attr("href")
+                val name = li.selectFirst("span.rpwwt-post-title")?.text() ?: a.text()
+                val posterUrl = li.selectFirst("img")?.attr("src")
+
+                // Creiamo l'oggetto risposta per la home
+                newTvSeriesSearchResponse(name, href, TvType.TvSeries) {
+                    this.posterUrl = posterUrl
+                }
+            }
+
+            if (items.isNotEmpty()) {
+                homePageLists.add(HomePageList(title, items))
+            }
+        }
+
+        // Aggiungiamo anche la sezione "I Più Visti" se presente (ha una struttura leggermente diversa)
+        document.select("div.widget_post_views_counter_list_widget").forEach { widget ->
+            val title = widget.selectFirst("h2.widget-title")?.text()?.trim() ?: "I Più Visti"
+            val items = widget.select("ol li").mapNotNull { li ->
+                val a = li.selectFirst("a.post-title") ?: return@mapNotNull null
+                val href = a.attr("href")
+                val name = a.text()
+                val posterUrl = li.selectFirst("img")?.attr("src")
+
+                newTvSeriesSearchResponse(name, href, TvType.TvSeries) {
+                    this.posterUrl = posterUrl
+                }
+            }
+            if (items.isNotEmpty()) {
+                homePageLists.add(HomePageList(title, items))
+            }
+        }
+
+        return HomePageResponse(homePageLists)
+    }
+
+//SEARCH
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/?s=$query"
         val document = app.get(url).document
