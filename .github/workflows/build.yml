@@ -40,19 +40,25 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v2
 
-      - name: Build Plugins
+     - name: Build Plugins
         run: |
           cd $GITHUB_WORKSPACE/src
           chmod +x gradlew
-          # Eseguiamo il build e la creazione del JSON
-          ./gradlew make makePluginsJson --stacktrace
+          # Pulizia totale e build forzata di tutti i moduli
+          ./gradlew clean make --no-daemon --stacktrace
           
-          # Copia intelligente: cerca tutti i file .cs3 ovunque siano e li mette in builds
+          # Verifichiamo dove sono finiti i file
+          echo "CERCO FILE CS3..."
+          find . -name "*.cs3"
+          
+          # Copia i file nella cartella builds
+          mkdir -p $GITHUB_WORKSPACE/builds
           find . -name "*.cs3" -exec cp {} $GITHUB_WORKSPACE/builds/ \;
           
-          # Copia il plugins.json (di solito sta nella root della build o in build/)
+          # Genera il JSON
+          ./gradlew makePluginsJson
           cp build/plugins.json $GITHUB_WORKSPACE/builds/ || cp plugins.json $GITHUB_WORKSPACE/builds/ || true
-
+      
       - name: Push builds
         run: |
           cd $GITHUB_WORKSPACE/builds
