@@ -1,6 +1,3 @@
-dependencies {
-    implementation("com.lagradost:cloudstream3:latest-version")
-}
 cloudstream {
     extra["prefix"] = "ToonItalia"
     extra["displayName"] = "Toon Italia"
