@@ -3,77 +3,28 @@ package com.toonitalia
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
-import org.jsoup.nodes.Element
+import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
+import com.lagradost.cloudstream3.plugins.Plugin
+import com.lagradost.cloudstream3.APIHolder
 
 class ToonItaliaProvider : MainAPI() {
     override var mainUrl = "https://toonitalia.xyz"
     override var name = "Toon Italia"
-    override val hasMainPage = true
+    override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime, TvType.Cartoon)
     override var lang = "it"
-    override val supportedTypes = setOf(
-        TvType.Contents,
-        TvType.TvSeries,
-        TvType.Anime,
-        TvType.Movie
-    )
-
-    override suspend fun getMainPage(
-        page: Int,
-        request: HomePageRequest
-    ): HomePageResponse {
-        val document = app.get(mainUrl).document
-        val homePageLists = mutableListOf<HomePageList>()
-
-        // 1. Sezioni classiche dai widget (Updates, Anime, Serie TV)
-        document.select("div.rpwwt-widget").forEach { widget ->
-            val title = widget.selectFirst("h2.widget-title")?.text()?.trim() ?: "Altro"
-            val items = widget.select("ul li").mapNotNull { li ->
-                val a = li.selectFirst("a") ?: return@mapNotNull null
-                val href = a.attr("href")
-                val name = li.selectFirst("span.rpwwt-post-title")?.text() ?: a.text()
-                val posterUrl = li.selectFirst("img")?.attr("src")
-
-                newTvSeriesSearchResponse(name, href, TvType.TvSeries) {
-                    this.posterUrl = posterUrl
-                }
-            }
-            if (items.isNotEmpty()) {
-                homePageLists.add(HomePageList(title, items))
-            }
-        }
-
-        // 2. Sezione "I Più Visti"
-        document.select("div.widget_post_views_counter_list_widget").forEach { widget ->
-            val title = widget.selectFirst("h2.widget-title")?.text()?.trim() ?: "I Più Visti"
-            val items = widget.select("ol li").mapNotNull { li ->
-                val a = li.selectFirst("a.post-title") ?: return@mapNotNull null
-                val href = a.attr("href")
-                val name = a.text()
-                val posterUrl = li.selectFirst("img")?.attr("src")
-
-                newTvSeriesSearchResponse(name, href, TvType.TvSeries) {
-                    this.posterUrl = posterUrl
-                }
-            }
-            if (items.isNotEmpty()) {
-                homePageLists.add(HomePageList(title, items))
-            }
-        }
-
-        return HomePageResponse(homePageLists)
-    }
+    override val hasMainPage = true
 
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/?s=$query"
         val document = app.get(url).document
 
-        return document.select("article").mapNotNull {
-            val titleHeader = it.selectFirst("h2.entry-title a") ?: return@mapNotNull null
-            val name = titleHeader.text()
+        return document.select("article").mapNotNull { article ->
+            val titleHeader = article.selectFirst("h2.entry-title a") ?: return@mapNotNull null
+            val title = titleHeader.text()
             val href = titleHeader.attr("href")
-            val posterUrl = it.selectFirst("img")?.attr("src")
+            val posterUrl = article.selectFirst("img")?.attr("src")
 
-            newTvSeriesSearchResponse(name, href, TvType.TvSeries) {
+            newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
                 this.posterUrl = posterUrl
             }
         }
@@ -90,7 +41,6 @@ class ToonItaliaProvider : MainAPI() {
 
         val episodes = mutableListOf<Episode>()
         
-        // 1. CERCA NEI BOTTONI (Serie TV) - CORRETTO
         document.select("a[class*='maxbutton']").forEach { button ->
             val link = button.attr("href")
             if (link.startsWith("http") && !link.contains("share")) {
@@ -100,12 +50,11 @@ class ToonItaliaProvider : MainAPI() {
             }
         }
 
-        // 2. CERCA NEI LINK TESTUALI (Film) - CORRETTO
         val contentLinks = document.select("div.entry-content a")
         contentLinks.forEach { a ->
             val href = a.attr("href")
             val text = a.text().trim()
-            val isVideoHost = listOf("voe", "vidhide", "chuckle-tube", "mixdrop", "streamtape", "streamup").any { 
+            val isVideoHost = listOf("voe", "vidhide", "chuckle-tube", "mixdrop", "streamtape", "lulustream", "streamup").any { 
                 href.contains(it) || text.contains(it, ignoreCase = true) 
             }
             
@@ -136,13 +85,10 @@ class ToonItaliaProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         if (loadExtractor(data, data, subtitleCallback, callback)) return true
-
         val doc = app.get(data).document
-        
         doc.select("iframe").map { it.attr("src") }.forEach { 
             loadExtractor(it, data, subtitleCallback, callback) 
         }
-
         return true
     }
 }
