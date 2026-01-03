@@ -31,64 +31,68 @@ class ToonItaliaProvider : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val document = app.get(url).document
-        val title = document.selectFirst("h1.entry-title")?.text()?.trim() ?: ""
-        val poster = document.selectFirst("div.entry-content img")?.attr("src")
-        
-        val plot = document.select("h3:contains(Trama) + p").text().ifEmpty {
-            document.select("div.entry-content p").firstOrNull { it.text().length > 30 }?.text()
-        }
+    val document = app.get(url).document
+    val title = document.selectFirst("h1.entry-title")?.text()?.replace("Streaming", "", true)?.trim() ?: ""
+    val poster = document.selectFirst("div.entry-content img")?.attr("src")
+    val plot = document.select("div.entry-content p").firstOrNull { it.text().length > 50 }?.text()
 
-        val episodes = mutableListOf<Episode>()
-        
-        document.select("a[class*='maxbutton']").forEach { button ->
-            val link = button.attr("href")
-            if (link.startsWith("http") && !link.contains("share")) {
-                episodes.add(newEpisode(link) { 
-                    this.name = button.text().trim() 
-                })
-            }
-        }
+    val episodes = mutableListOf<Episode>()
 
-        val contentLinks = document.select("div.entry-content a")
-        contentLinks.forEach { a ->
-            val href = a.attr("href")
-            val text = a.text().trim()
-            val isVideoHost = listOf("voe", "vidhide", "chuckle-tube", "mixdrop", "streamtape").any { 
-                href.contains(it) || text.contains(it, ignoreCase = true) 
-            }
+    // Selezioniamo il paragrafo che contiene gli episodi
+    // Cerchiamo quello che contiene il pattern tipico delle serie (numero x numero)
+    document.select("div.entry-content p").forEach { p ->
+        val htmlContent = p.html()
+        // Dividiamo il contenuto per i tag <br>, così analizziamo riga per riga
+        val lines = htmlContent.split("<br>")
+
+        lines.forEach { line ->
+            val lineDoc = org.jsoup.Jsoup.parseBodyFragment(line)
+            val lineText = lineDoc.text()
             
-            if (isVideoHost) {
-                episodes.add(newEpisode(href) {
-                    this.name = if (text.length < 2) "Streaming" else text
-                })
-            }
-        }
+            // Regex per trovare Stagione e Episodio (es: 1×01 o 2x14)
+            val match = Regex("""(\d+)[×x](\d+)""").find(lineText)
+            val season = match?.groupValues?.get(1)?.toIntOrNull()
+            val episodeNumber = match?.groupValues?.get(2)?.toIntOrNull()
+            
+            // Estraiamo il titolo dell'episodio (testo tra il numero e il primo link)
+            val episodeTitle = lineText.substringAfter("–").substringBefore("–").trim()
 
-        return if (episodes.size <= 1) {
-            newMovieLoadResponse(title, url, TvType.Movie, episodes.firstOrNull()?.data ?: url) {
-                this.posterUrl = poster
-                this.plot = plot
-            }
-        } else {
-            newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
-                this.posterUrl = poster
-                this.plot = plot
+            lineDoc.select("a").forEach { a ->
+                val href = a.attr("href")
+                val hostName = a.text().trim()
+
+                if (href.isNotBlank()) {
+                    episodes.add(newEpisode(href) {
+                        this.name = if (episodeTitle.isNotEmpty() && episodeTitle != hostName) {
+                            "$episodeTitle ($hostName)"
+                        } else {
+                            "Episodio $episodeNumber ($hostName)"
+                        }
+                        this.season = season
+                        this.episode = episodeNumber
+                    })
+                }
             }
         }
     }
 
+    return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
+        this.posterUrl = poster
+        this.plot = plot
+    }
+}
+
     override suspend fun loadLinks(
-        data: String,
-        isCasting: Boolean,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ): Boolean {
-        if (loadExtractor(data, data, subtitleCallback, callback)) return true
-        val doc = app.get(data).document
-        doc.select("iframe").map { it.attr("src") }.forEach { 
-            loadExtractor(it, data, subtitleCallback, callback) 
-        }
-        return true
+    data: String,
+    isCasting: Boolean,
+    subtitleCallback: (SubtitleFile) -> Unit,
+    callback: (ExtractorLink) -> Unit
+): Boolean {
+    // Carichiamo la pagina dell'host (es. VOE o LuluStream)
+    val response = app.get(data)
+    
+    // Gli estrattori di Cloudstream spesso riconoscono automaticamente 
+    // i link di VOE e LuluStream (LuluStream usa l'estrattore di MixDrop o simili)
+    return loadExtractor(response.url, data, subtitleCallback, callback)
     }
 }
