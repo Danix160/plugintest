@@ -77,18 +77,37 @@ class ToonItaliaProvider : MainAPI() {
             }
         }
     }
-
+//ESTRATTORE
     override suspend fun loadLinks(
-        data: String,
-        isCasting: Boolean,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ): Boolean {
-        if (loadExtractor(data, data, subtitleCallback, callback)) return true
-        val doc = app.get(data).document
-        doc.select("iframe").map { it.attr("src") }.forEach { 
-            loadExtractor(it, data, subtitleCallback, callback) 
+    data: String,
+    isCasting: Boolean,
+    subtitleCallback: (SubtitleFile) -> Unit,
+    callback: (ExtractorLink) -> Unit
+): Boolean {
+    val document = app.get(data).document
+
+    // Cerchiamo tutti i link possibili nella pagina dell'episodio
+    document.select("a, iframe").forEach { element ->
+        val link = if (element.tagName() == "a") element.attr("href") else element.attr("src")
+        
+        // Se il link è un URL diretto a VOE
+        if (link.contains("voe.sx")) {
+            loadExtractor(link, data, subtitleCallback, callback)
+        } 
+        // Se il link sembra uno di quelli "strani" (come quello che hai postato)
+        else if (link.contains("crystaltreatmenteast.com") || link.contains("rebrand.ly")) {
+            // Entriamo nel link del redirect per trovare quello vero
+            val redirectedPage = app.get(link).document
+            // Cerchiamo se nella nuova pagina c'è un link VOE o un iframe
+            val realVoeLink = redirectedPage.selectFirst("a[href*=voe.sx], iframe[src*=voe.sx]")
+            
+            val finalUrl = realVoeLink?.let { 
+                if (it.tagName() == "a") it.attr("href") else it.attr("src") 
+            }
+            
+            finalUrl?.let { loadExtractor(it, link, subtitleCallback, callback) }
         }
-        return true
     }
+    return true
+}
 }
