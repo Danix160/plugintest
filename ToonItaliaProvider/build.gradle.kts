@@ -1,6 +1,6 @@
 cloudstream {
-    setPrefix("ToonItalia") // <--- AGGIUNGI QUESTA RIGA: darà il nome al file finale
-    setDisplayName("Toon Italia") // <--- AGGIUNGI QUESTA RIGA: il nome che appare nell'app
+    extra["prefix"] = "ToonItalia"
+    extra["displayName"] = "Toon Italia"
     
     version = 1
     description = "Archivio di Anime e Cartoni animati in italiano da ToonItalia.xyz"
