@@ -79,41 +79,31 @@ class ToonItaliaProvider : MainAPI() {
     }
 
     override suspend fun loadLinks(
-    data: String,
-    isCasting: Boolean,
-    subtitleCallback: (SubtitleFile) -> Unit,
-    callback: (ExtractorLink) -> Unit
-): Boolean {
-    // Cerchiamo tutti i link (href) nell'HTML dell'episodio
-    // Il pattern cerca chuckletube, luluvdo e i classici voe/lulu
-    val linkRegex = Regex("""https?://[^\s"'<>]+(?:chuckle-tube\.com|luluvdo\.com|voe\.sx|lulustream\.com|short\.ink)[^\s"'<>]*""")
-    
-    val matches = linkRegex.findAll(data).map { it.value }.toSet()
+        data: String,
+        isCasting: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        // 'data' qui è l'URL che abbiamo aggiunto nella funzione load()
+        // Es: https://chuckle-tube.com/xxxxx
+        
+        var finalUrl = data
 
-    matches.forEach { link ->
-        // 1. Gestione VOE tramite ponte Chuckle-Tube
-        if (link.contains("chuckle-tube.com")) {
-            // Chuckle-tube è un redirect diretto a VOE
-            val finalUrl = app.get(link, allowRedirects = true).url
-            if (finalUrl.contains("voe")) {
-                loadExtractor(finalUrl, link, subtitleCallback, callback)
+        // 1. Gestione specifica per i domini ponte
+        if (data.contains("chuckle-tube.com") || data.contains("luluvdo.com")) {
+            try {
+                // Seguiamo il redirect per arrivare all'host reale (VOE o Lulu)
+                val response = app.get(data, allowRedirects = true, timeout = 10)
+                finalUrl = response.url
+            } catch (e: Exception) {
+                return false
             }
-        } 
-        
-        // 2. Gestione LuluStream tramite ponte Luluvdo
-        else if (link.contains("luluvdo.com")) {
-            // Trasformiamo l'URL luluvdo in un URL lulustream standard se necessario
-            // o seguiamo il redirect
-            val finalUrl = app.get(link, allowRedirects = true).url
-            loadExtractor(finalUrl, link, subtitleCallback, callback)
         }
-        
-        // 3. Altri link diretti (se presenti)
-        else {
-            loadExtractor(link, data, subtitleCallback, callback)
-        }
-    }
 
-    return true
-}
+        // 2. Lanciamo l'estrattore sull'URL finale
+        // loadExtractor riconosce automaticamente VOE, LuluStream, MixDrop, ecc.
+        loadExtractor(finalUrl, data, subtitleCallback, callback)
+
+        return true
+    }
 }
