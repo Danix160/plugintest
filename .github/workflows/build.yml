@@ -43,7 +43,8 @@ jobs:
       - name: Build Plugins
         run: |
           cd $GITHUB_WORKSPACE/src
-          chmod +x gradlew
+           chmod +x gradlew
+          ./gradlew clean :ToonItaliaProvider:make
           # Eseguiamo il build e la creazione del JSON
           ./gradlew make makePluginsJson --stacktrace
           
