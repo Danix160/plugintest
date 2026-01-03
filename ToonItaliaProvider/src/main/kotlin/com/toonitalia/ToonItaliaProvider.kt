@@ -92,11 +92,3 @@ class ToonItaliaProvider : MainAPI() {
         return true
     }
 }
-
-// AGGIUNGI QUESTO BLOCCO ALLA FINE - FONDAMENTALE PER IL FILE .CS3
-@CloudstreamPlugin
-class ToonItaliaPlugin : CloudstreamPlugin() {
-    override fun load(context: android.content.Context) {
-        registerMainAPI(ToonItaliaProvider())
-    }
-}
