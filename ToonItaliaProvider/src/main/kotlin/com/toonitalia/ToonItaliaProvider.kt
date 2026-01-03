@@ -78,32 +78,37 @@ class ToonItaliaProvider : MainAPI() {
         }
     }
 
+    // ... (resto del codice search e load)
+
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // 'data' qui è l'URL che abbiamo aggiunto nella funzione load()
-        // Es: https://chuckle-tube.com/xxxxx
-        
-        var finalUrl = data
+        val cleanUrl = data.trim().replace(" ", "")
+        if (!cleanUrl.startsWith("http")) return false
 
-        // 1. Gestione specifica per i domini ponte
-        if (data.contains("chuckle-tube.com") || data.contains("luluvdo.com")) {
+        // Seguiamo i redirect per i domini "ponte"
+        val finalUrl = if (cleanUrl.contains("chuckle-tube.com") || cleanUrl.contains("luluvdo.com")) {
             try {
-                // Seguiamo il redirect per arrivare all'host reale (VOE o Lulu)
-                val response = app.get(data, allowRedirects = true, timeout = 10)
-                finalUrl = response.url
+                val response = app.get(
+                    cleanUrl, 
+                    allowRedirects = true, 
+                    headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                )
+                response.url 
             } catch (e: Exception) {
-                return false
+                cleanUrl 
             }
+        } else {
+            cleanUrl
         }
 
-        // 2. Lanciamo l'estrattore sull'URL finale
-        // loadExtractor riconosce automaticamente VOE, LuluStream, MixDrop, ecc.
-        loadExtractor(finalUrl, data, subtitleCallback, callback)
+        // Carichiamo il video usando il referer corretto
+        loadExtractor(finalUrl, "https://toonitalia.xyz/", subtitleCallback, callback)
 
         return true
     }
+}
 }
