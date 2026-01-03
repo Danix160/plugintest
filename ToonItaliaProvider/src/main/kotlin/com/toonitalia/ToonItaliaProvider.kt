@@ -39,7 +39,7 @@ class ToonItaliaProvider : MainAPI() {
 
         val episodes = mutableListOf<Episode>()
         
-        // Estrattore per i pulsanti classici
+        // Estrazione pulsanti maxbutton
         document.select("a[class*='maxbutton']").forEach { button ->
             val link = button.attr("href")
             if (link.startsWith("http") && !link.contains("share")) {
@@ -49,9 +49,8 @@ class ToonItaliaProvider : MainAPI() {
             }
         }
 
-        // Estrattore per i link nel testo (Chuckle-Tube, VOE, Lulu, etc.)
-        val contentLinks = document.select("div.entry-content a")
-        contentLinks.forEach { a ->
+        // Estrazione link testuali
+        document.select("div.entry-content a").forEach { a ->
             val href = a.attr("href")
             val text = a.text().trim()
             val isVideoHost = listOf("voe", "vidhide", "chuckle-tube", "luluvdo", "mixdrop", "streamtape").any { 
@@ -84,16 +83,16 @@ class ToonItaliaProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val cleanUrl = data.trim().replace(" ", "")
+        val cleanUrl = data.trim()
         if (!cleanUrl.startsWith("http")) return false
 
-        // Risolviamo i redirect per i domini "ponte"
         val finalUrl = if (cleanUrl.contains("chuckle-tube.com") || cleanUrl.contains("luluvdo.com")) {
             try {
+                // Eseguiamo la richiesta per seguire il redirect al vero host
                 val response = app.get(
                     cleanUrl, 
                     allowRedirects = true, 
-                    headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                    headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
                 )
                 response.url 
             } catch (e: Exception) {
@@ -103,7 +102,7 @@ class ToonItaliaProvider : MainAPI() {
             cleanUrl
         }
 
-        // Lanciamo l'estrattore universale di CloudStream
+        // loadExtractor si occupa di identificare il player corretto
         loadExtractor(finalUrl, "https://toonitalia.xyz/", subtitleCallback, callback)
 
         return true
