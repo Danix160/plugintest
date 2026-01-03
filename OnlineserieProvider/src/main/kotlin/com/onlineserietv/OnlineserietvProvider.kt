@@ -1,4 +1,4 @@
-package it.dogior.hadEnough
+package com.onlineserietv
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
