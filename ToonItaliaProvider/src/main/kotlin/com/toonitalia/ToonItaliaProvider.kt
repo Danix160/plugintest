@@ -3,9 +3,7 @@ package com.toonitalia
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
-import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
-import com.lagradost.cloudstream3.plugins.Plugin
-import com.lagradost.cloudstream3.APIHolder
+import com.lagradost.cloudstream3.utils.SubtitleFile
 
 class ToonItaliaProvider : MainAPI() {
     override var mainUrl = "https://toonitalia.xyz"
@@ -41,6 +39,7 @@ class ToonItaliaProvider : MainAPI() {
 
         val episodes = mutableListOf<Episode>()
         
+        // Estrattore per i pulsanti classici
         document.select("a[class*='maxbutton']").forEach { button ->
             val link = button.attr("href")
             if (link.startsWith("http") && !link.contains("share")) {
@@ -50,11 +49,12 @@ class ToonItaliaProvider : MainAPI() {
             }
         }
 
+        // Estrattore per i link nel testo (Chuckle-Tube, VOE, Lulu, etc.)
         val contentLinks = document.select("div.entry-content a")
         contentLinks.forEach { a ->
             val href = a.attr("href")
             val text = a.text().trim()
-            val isVideoHost = listOf("voe", "vidhide", "chuckle-tube", "mixdrop", "streamtape").any { 
+            val isVideoHost = listOf("voe", "vidhide", "chuckle-tube", "luluvdo", "mixdrop", "streamtape").any { 
                 href.contains(it) || text.contains(it, ignoreCase = true) 
             }
             
@@ -78,8 +78,6 @@ class ToonItaliaProvider : MainAPI() {
         }
     }
 
-    // ... (resto del codice search e load)
-
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -89,7 +87,7 @@ class ToonItaliaProvider : MainAPI() {
         val cleanUrl = data.trim().replace(" ", "")
         if (!cleanUrl.startsWith("http")) return false
 
-        // Seguiamo i redirect per i domini "ponte"
+        // Risolviamo i redirect per i domini "ponte"
         val finalUrl = if (cleanUrl.contains("chuckle-tube.com") || cleanUrl.contains("luluvdo.com")) {
             try {
                 val response = app.get(
@@ -105,10 +103,9 @@ class ToonItaliaProvider : MainAPI() {
             cleanUrl
         }
 
-        // Carichiamo il video usando il referer corretto
+        // Lanciamo l'estrattore universale di CloudStream
         loadExtractor(finalUrl, "https://toonitalia.xyz/", subtitleCallback, callback)
 
         return true
     }
-}
 }
