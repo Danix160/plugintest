@@ -78,7 +78,7 @@ class ToonItaliaProvider : MainAPI() {
         }
     }
 //ESTRATTORE
-    override suspend fun loadLinks(
+  override suspend fun loadLinks(
     data: String,
     isCasting: Boolean,
     subtitleCallback: (SubtitleFile) -> Unit,
@@ -86,26 +86,34 @@ class ToonItaliaProvider : MainAPI() {
 ): Boolean {
     val document = app.get(data).document
 
-    // Cerchiamo tutti i link possibili nella pagina dell'episodio
-    document.select("a, iframe").forEach { element ->
-        val link = if (element.tagName() == "a") element.attr("href") else element.attr("src")
-        
-        // Se il link è un URL diretto a VOE
-        if (link.contains("voe.sx")) {
+    // 1. Cerchiamo tutti i link e gli iframe
+    document.select("a, iframe, source").forEach { element ->
+        val link = element.attr("href").ifEmpty { element.attr("src") }
+        if (link.isEmpty() || link.startsWith("javascript")) return@forEach
+
+        // 2. Se è già un link VOE, caricalo subito
+        if (link.contains("voe.sx") || link.contains("voe-un-block")) {
             loadExtractor(link, data, subtitleCallback, callback)
         } 
-        // Se il link sembra uno di quelli "strani" (come quello che hai postato)
-        else if (link.contains("crystaltreatmenteast.com") || link.contains("rebrand.ly")) {
-            // Entriamo nel link del redirect per trovare quello vero
-            val redirectedPage = app.get(link).document
-            // Cerchiamo se nella nuova pagina c'è un link VOE o un iframe
-            val realVoeLink = redirectedPage.selectFirst("a[href*=voe.sx], iframe[src*=voe.sx]")
+        
+        // 3. Gestione link "Ponte" (crystaltreatmenteast, rebrandly, ecc.)
+        else if (link.contains("crystaltreatmenteast.com") || link.contains("rebrand.ly") || link.contains("short")) {
+            // Usiamo una richiesta che segue i redirect automaticamente senza scaricare tutto l'HTML se possibile
+            val response = app.get(link, allowRedirects = true)
+            val finalUrl = response.url
             
-            val finalUrl = realVoeLink?.let { 
-                if (it.tagName() == "a") it.attr("href") else it.attr("src") 
+            if (finalUrl.contains("voe.sx")) {
+                loadExtractor(finalUrl, link, subtitleCallback, callback)
+            } else {
+                // Se l'URL finale non è ancora VOE, cerchiamo dentro la pagina di atterraggio
+                val doc2 = response.document
+                val hiddenLink = doc2.selectFirst("a[href*=voe.sx], iframe[src*=voe.sx], script")?.let {
+                    it.attr("href").ifEmpty { it.attr("src") }
+                }
+                if (hiddenLink?.contains("voe.sx") == true) {
+                    loadExtractor(hiddenLink, finalUrl, subtitleCallback, callback)
+                }
             }
-            
-            finalUrl?.let { loadExtractor(it, link, subtitleCallback, callback) }
         }
     }
     return true
