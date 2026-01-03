@@ -1,0 +1,8 @@
+{
+  "name": "Danix,
+  "description": "Repository Personale",
+  "manifestVersion": 1,
+  "pluginLists": [
+    "https://raw.githubusercontent.com/Danix160/plugintest/builds/plugins.json"
+  ]
+}
