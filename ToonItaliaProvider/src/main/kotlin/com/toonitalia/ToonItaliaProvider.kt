@@ -84,38 +84,47 @@ class ToonItaliaProvider : MainAPI() {
     subtitleCallback: (SubtitleFile) -> Unit,
     callback: (ExtractorLink) -> Unit
 ): Boolean {
-    val document = app.get(data).document
+    // 1. Scarichiamo la pagina e usiamo 'use' per assicurarci di chiudere le risorse (evita l'errore nel log)
+    val response = app.get(data)
+    val document = response.document
 
-    // 1. Cerchiamo tutti i link e gli iframe
-    document.select("a, iframe, source").forEach { element ->
-        val link = element.attr("href").ifEmpty { element.attr("src") }
-        if (link.isEmpty() || link.startsWith("javascript")) return@forEach
+    // 2. ToonItalia spesso mette i link in pulsanti o dentro script. 
+    // Cerchiamo ovunque: a, iframe, e persino dentro gli script.
+    val potentialLinks = mutableSetOf<String>()
+    
+    document.select("a, iframe, source").forEach { 
+        val href = it.attr("href")
+        val src = it.attr("src")
+        if (href.isNotEmpty()) potentialLinks.add(href)
+        if (src.isNotEmpty()) potentialLinks.add(src)
+    }
 
-        // 2. Se è già un link VOE, caricalo subito
-        if (link.contains("voe.sx") || link.contains("voe-un-block")) {
-            loadExtractor(link, data, subtitleCallback, callback)
-        } 
-        
-        // 3. Gestione link "Ponte" (crystaltreatmenteast, rebrandly, ecc.)
-        else if (link.contains("crystaltreatmenteast.com") || link.contains("rebrand.ly") || link.contains("short")) {
-            // Usiamo una richiesta che segue i redirect automaticamente senza scaricare tutto l'HTML se possibile
-            val response = app.get(link, allowRedirects = true)
-            val finalUrl = response.url
+    potentialLinks.forEach { link ->
+        // Salta link palesemente inutili per risparmiare tempo
+        if (link.startsWith("javascript") || link.contains("facebook") || link.contains("twitter")) return@forEach
+
+        // Caso A: Link VOE diretto o con redirect semplice
+        if (link.contains("voe.sx") || link.contains("voe-un-block") || link.contains("crystaltreatmenteast.com")) {
             
-            if (finalUrl.contains("voe.sx")) {
-                loadExtractor(finalUrl, link, subtitleCallback, callback)
+            // Per i link ponte, dobbiamo ottenere l'URL finale dopo il redirect
+            val finalUrl = if (link.contains("crystaltreatmenteast.com")) {
+                // Eseguiamo una chiamata HEAD o GET veloce per seguire il redirect
+                app.get(link, allowRedirects = true).url
             } else {
-                // Se l'URL finale non è ancora VOE, cerchiamo dentro la pagina di atterraggio
-                val doc2 = response.document
-                val hiddenLink = doc2.selectFirst("a[href*=voe.sx], iframe[src*=voe.sx], script")?.let {
-                    it.attr("href").ifEmpty { it.attr("src") }
-                }
-                if (hiddenLink?.contains("voe.sx") == true) {
-                    loadExtractor(hiddenLink, finalUrl, subtitleCallback, callback)
-                }
+                link
+            }
+
+            if (finalUrl.contains("voe")) {
+                loadExtractor(finalUrl, data, subtitleCallback, callback)
             }
         }
+        
+        // Caso B: Altri Host comuni (opzionale ma consigliato)
+        else if (link.contains("speedvideo") || link.contains("mixdrop") || link.contains("delta")) {
+            loadExtractor(link, data, subtitleCallback, callback)
+        }
     }
+
     return true
 }
 }
