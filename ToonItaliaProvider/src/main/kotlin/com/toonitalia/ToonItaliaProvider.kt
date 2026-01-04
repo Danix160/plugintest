@@ -125,3 +125,40 @@ class ToonItaliaProvider : MainAPI() {
         // 2. LOGICA FILM / FALLBACK (Se non ci sono episodi numerati o è un film)
         if (episodes.isEmpty()) {
             entryContent?.select("a")?.forEach { a ->
+                val href = a.attr("href")
+                val linkText = a.text().trim()
+                
+                // Filtriamo i link che puntano agli host video conosciuti
+                if (href.contains("http") && 
+                    (linkText.contains("VOE", true) || 
+                     linkText.contains("Lulu", true) || 
+                     linkText.contains("Stream", true))) {
+                    
+                    episodes.add(newEpisode(href) {
+                        this.name = "Film - $linkText"
+                        this.posterUrl = fixUrlNull(poster)
+                    })
+                }
+            }
+        }
+
+        // Determiniamo il tipo: se è nella categoria film o ha pochi "episodi", lo trattiamo come film
+        val tvType = if (url.contains("film") || episodes.size <= 2) TvType.Movie else TvType.TvSeries
+
+        return newTvSeriesLoadResponse(title, url, tvType, episodes.sortedBy { it.episode }) {
+            this.posterUrl = fixUrlNull(poster)
+            this.posterHeaders = commonHeaders
+            this.plot = plot
+            this.tags = listOf("ToonItalia")
+        }
+    }
+
+    override suspend fun loadLinks(
+        data: String,
+        isCasting: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        return loadExtractor(fixHostUrl(data), subtitleCallback, callback)
+    }
+}
