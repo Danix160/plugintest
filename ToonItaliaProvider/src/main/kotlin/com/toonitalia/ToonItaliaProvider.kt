@@ -38,8 +38,12 @@ class ToonItaliaProvider : MainAPI() {
             val titleHeader = article.selectFirst("h2.entry-title a") ?: return@mapNotNull null
             val title = titleHeader.text()
             val href = titleHeader.attr("href")
+            
+            // FIX IMMAGINI: Cerca prima data-src, poi src
             val img = article.selectFirst("img")
-            val posterUrl = img?.attr("src")
+            val posterUrl = img?.attr("data-src")?.takeIf { it.isNotBlank() } 
+                ?: img?.attr("data-lazy-src")?.takeIf { it.isNotBlank() }
+                ?: img?.attr("src")
 
             newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
                 this.posterUrl = fixUrlNull(posterUrl)
@@ -57,8 +61,12 @@ class ToonItaliaProvider : MainAPI() {
             val titleHeader = article.selectFirst("h2.entry-title a") ?: return@mapNotNull null
             val title = titleHeader.text()
             val href = titleHeader.attr("href")
+            
+            // FIX IMMAGINI: Fondamentale per la ricerca (es. Scooby Doo)
             val img = article.selectFirst("img")
-            val posterUrl = img?.attr("src")
+            val posterUrl = img?.attr("data-src")?.takeIf { it.isNotBlank() } 
+                ?: img?.attr("data-lazy-src")?.takeIf { it.isNotBlank() }
+                ?: img?.attr("src")
 
             newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
                 this.posterUrl = fixUrlNull(posterUrl)
@@ -74,8 +82,10 @@ class ToonItaliaProvider : MainAPI() {
         val title = document.selectFirst("h1.entry-title")?.text()
             ?.replace(Regex("(?i)streaming|sub\\s?ita"), "")?.trim() ?: ""
             
-        val img = document.selectFirst("div.entry-content img")
-        val poster = img?.attr("src")
+        val img = document.selectFirst("div.entry-content img, .post-thumbnail img")
+        val poster = img?.attr("data-src")?.takeIf { it.isNotBlank() } 
+            ?: img?.attr("data-lazy-src")?.takeIf { it.isNotBlank() }
+            ?: img?.attr("src")
                      
         val plot = document.select("div.entry-content p")
             .firstOrNull { it.text().length > 50 && !it.text().contains("VOE") }?.text()
@@ -85,14 +95,11 @@ class ToonItaliaProvider : MainAPI() {
         val htmlContent = entryContent?.html() ?: ""
         val lines = htmlContent.split(Regex("<br\\s*/?>|</p>|</div>"))
 
-        // 1. LOGICA SERIE TV
         lines.forEach { line ->
             val docLine = Jsoup.parseBodyFragment(line)
             val text = docLine.text().trim()
-            
             val matchSimple = Regex("""^(\d+)\s*–""").find(text)
             val matchSE = Regex("""(\d+)[×x](\d+)""").find(text)
-
             val e = matchSE?.groupValues?.get(2)?.toIntOrNull() ?: matchSimple?.groupValues?.get(1)?.toIntOrNull()
             val s = matchSE?.groupValues?.get(1)?.toIntOrNull() ?: 1
 
@@ -108,27 +115,21 @@ class ToonItaliaProvider : MainAPI() {
                             this.name = "$epName (${a.text()})"
                             this.season = s
                             this.episode = e
-                            this.posterUrl = fixUrlNull(poster) // Assegnazione automatica del poster
+                            this.posterUrl = fixUrlNull(poster)
                         })
                     }
                 }
             }
         }
 
-        // 2. LOGICA FILM
         if (episodes.isEmpty()) {
             entryContent?.select("a")?.forEach { a ->
                 val href = a.attr("href")
                 val linkText = a.text().trim()
-                
-                if (href.contains("http") && 
-                    (linkText.contains("VOE", true) || 
-                     linkText.contains("Lulu", true) || 
-                     linkText.contains("Stream", true))) {
-                    
+                if (href.contains("http") && (linkText.contains("VOE", true) || linkText.contains("Lulu", true) || linkText.contains("Stream", true))) {
                     episodes.add(newEpisode(href) {
                         this.name = "Film - $linkText"
-                        this.posterUrl = fixUrlNull(poster) // Assegnazione automatica del poster
+                        this.posterUrl = fixUrlNull(poster)
                     })
                 }
             }
@@ -143,12 +144,7 @@ class ToonItaliaProvider : MainAPI() {
         }
     }
 
-    override suspend fun loadLinks(
-        data: String,
-        isCasting: Boolean,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ): Boolean {
+    override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
         return loadExtractor(fixHostUrl(data), subtitleCallback, callback)
     }
 }
