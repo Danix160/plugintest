@@ -14,6 +14,9 @@ class ToonItaliaProvider : MainAPI() {
     override var lang = "it"
     override val hasMainPage = true
 
+    // Logo usato SOLO per la griglia di ricerca
+    private val searchPlaceholderLogo = "https://toonitalia.xyz/wp-content/uploads/2023/11/toonitalia-logo-1.png"
+
     private val commonHeaders = mapOf(
         "Referer" to "$mainUrl/",
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
@@ -39,10 +42,9 @@ class ToonItaliaProvider : MainAPI() {
             val title = titleHeader.text()
             val href = titleHeader.attr("href")
             
-            // FIX IMMAGINI: Cerca prima data-src, poi src
+            // In Homepage cerchiamo l'immagine REALE
             val img = article.selectFirst("img")
             val posterUrl = img?.attr("data-src")?.takeIf { it.isNotBlank() } 
-                ?: img?.attr("data-lazy-src")?.takeIf { it.isNotBlank() }
                 ?: img?.attr("src")
 
             newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
@@ -62,14 +64,9 @@ class ToonItaliaProvider : MainAPI() {
             val title = titleHeader.text()
             val href = titleHeader.attr("href")
             
-            // FIX IMMAGINI: Fondamentale per la ricerca (es. Scooby Doo)
-            val img = article.selectFirst("img")
-            val posterUrl = img?.attr("data-src")?.takeIf { it.isNotBlank() } 
-                ?: img?.attr("data-lazy-src")?.takeIf { it.isNotBlank() }
-                ?: img?.attr("src")
-
+            // Solo qui nella RICERCA usiamo il logo per evitare i quadrati vuoti
             newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
-                this.posterUrl = fixUrlNull(posterUrl)
+                this.posterUrl = searchPlaceholderLogo
                 this.posterHeaders = commonHeaders
             }
         }
@@ -82,10 +79,11 @@ class ToonItaliaProvider : MainAPI() {
         val title = document.selectFirst("h1.entry-title")?.text()
             ?.replace(Regex("(?i)streaming|sub\\s?ita"), "")?.trim() ?: ""
             
+        // Cerchiamo la locandina reale per la pagina dettagli
         val img = document.selectFirst("div.entry-content img, .post-thumbnail img")
         val poster = img?.attr("data-src")?.takeIf { it.isNotBlank() } 
-            ?: img?.attr("data-lazy-src")?.takeIf { it.isNotBlank() }
-            ?: img?.attr("src")
+            ?: img?.attr("src")?.takeIf { it.isNotBlank() && !it.contains("placeholder") }
+            ?: searchPlaceholderLogo
                      
         val plot = document.select("div.entry-content p")
             .firstOrNull { it.text().length > 50 && !it.text().contains("VOE") }?.text()
@@ -115,13 +113,14 @@ class ToonItaliaProvider : MainAPI() {
                             this.name = "$epName (${a.text()})"
                             this.season = s
                             this.episode = e
-                            this.posterUrl = fixUrlNull(poster)
+                            this.posterUrl = poster
                         })
                     }
                 }
             }
         }
 
+        // LOGICA FILM
         if (episodes.isEmpty()) {
             entryContent?.select("a")?.forEach { a ->
                 val href = a.attr("href")
@@ -129,7 +128,7 @@ class ToonItaliaProvider : MainAPI() {
                 if (href.contains("http") && (linkText.contains("VOE", true) || linkText.contains("Lulu", true) || linkText.contains("Stream", true))) {
                     episodes.add(newEpisode(href) {
                         this.name = "Film - $linkText"
-                        this.posterUrl = fixUrlNull(poster)
+                        this.posterUrl = poster
                     })
                 }
             }
@@ -138,7 +137,7 @@ class ToonItaliaProvider : MainAPI() {
         val tvType = if (url.contains("film") || episodes.size <= 2) TvType.Movie else TvType.TvSeries
 
         return newTvSeriesLoadResponse(title, url, tvType, episodes.sortedBy { it.episode }) {
-            this.posterUrl = fixUrlNull(poster)
+            this.posterUrl = poster
             this.posterHeaders = commonHeaders
             this.plot = plot
         }
