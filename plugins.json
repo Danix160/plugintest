@@ -25,7 +25,7 @@
         "iconUrl": "https://tanti-film.stream/templates/tantifilm/images/favicon.ico",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/Danix160/plugintest",
-        "fileSize": 11036,
+        "fileSize": 11605,
         "status": 1,
         "language": "it",
         "authors": [
@@ -33,11 +33,9 @@
         ],
         "tvTypes": [
             "Movie",
-            "TvSeries",
-            "Anime",
-            "Cartoon"
+            "TvSeries"
         ],
-        "version": 2,
+        "version": 10,
         "internalName": "TantiFilmProvider",
         "description": "Film e Serie TV",
         "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/TantiFilmProvider.cs3",
