@@ -6,6 +6,13 @@ import com.lagradost.cloudstream3.network.CloudflareKiller
 import org.jsoup.nodes.Document
 
 class OnlineserieProvider : MainAPI() { // Nome classe corretto qui
+
+     // Definiamo gli headers globali all'inizio della classe
+    private val commonHeaders = mapOf(
+        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer" to mainUrl
+    )
+    
     override var mainUrl = "https://onlineserietv.com"
     override var name = "OnlineSerieTV"
     override val supportedTypes = setOf(TvType.TvSeries, TvType.Movie, TvType.Cartoon)
@@ -39,42 +46,33 @@ class OnlineserieProvider : MainAPI() { // Nome classe corretto qui
         return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
     }
 
-   // Questo forza Cloudstream a usare gli headers corretti per ogni richiesta, inclusi i poster
-    override fun fixUrl(url: String): String {
-        return url
-    }
-
-    // Usiamo una mappa di headers globale per il provider
-    private val commonHeaders = mapOf(
-        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Referer" to mainUrl
-    )
-
-    // Modifica la tua funzione search per usare questi headers
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/?s=${query.replace(" ", "+")}"
         
-        // È fondamentale passare interceptor = cfKiller
+        // Usiamo cfKiller per gestire il blocco Cloudflare che abbiamo visto nei log
         val response = app.get(
             url, 
             interceptor = cfKiller, 
             headers = commonHeaders,
-            timeout = 60 // Cloudflare Turnstile è lento, 60s è più sicuro
+            timeout = 60 
         )
         
         val document = response.document
         
-        // Selettore aggiornato basato sulla struttura WordPress del sito
+        // Cerchiamo gli articoli o i wrap dei post
         return document.select("article, .uagb-post__inner-wrap").mapNotNull { card ->
+            // Cerchiamo il link del titolo
             val titleElement = card.selectFirst("h2 a, h3 a, .uagb-post__title a") ?: return@mapNotNull null
             val title = titleElement.text().trim()
             val href = titleElement.attr("href")
             
-            // Estrai il poster e assicurati che sia un URL assoluto
-            val posterUrl = card.selectFirst("img")?.attr("src")?.let { fixUrl(it) }
+            // Estraiamo l'immagine
+            val posterUrl = card.selectFirst("img")?.attr("src")
 
             newMovieSearchResponse(title, href, TvType.Movie) {
                 this.posterUrl = posterUrl
+                // Aggiungiamo gli headers specifici per i poster qui
+                this.posterHeaders = commonHeaders
             }
         }
     }
