@@ -19,6 +19,9 @@ class ToonItaliaProvider : MainAPI() {
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     )
 
+    // Regex universale per pulire i titoli e favorire il matching con TMDB
+    private val titleCleaner = Regex("(?i)streaming|sub\\s?ita|serie tv|serie animata|tutte le stagioni|completa|raccolta|film|animata")
+
     override val mainPage = mainPageOf(
         "$mainUrl/category/anime" to "Anime",
         "$mainUrl/category/film-animazione/" to "Film Animazione",
@@ -36,12 +39,14 @@ class ToonItaliaProvider : MainAPI() {
         val document = app.get(request.data, headers = commonHeaders).document
         val items = document.select("article").mapNotNull { article ->
             val titleHeader = article.selectFirst("h2.entry-title a") ?: return@mapNotNull null
-            val title = titleHeader.text()
+            val rawTitle = titleHeader.text()
+            val cleanedTitle = rawTitle.replace(titleCleaner, "").trim()
+            
             val href = titleHeader.attr("href")
             val img = article.selectFirst("img")
             val posterUrl = img?.attr("data-src")?.takeIf { it.isNotBlank() } ?: img?.attr("src")
 
-            newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
+            newTvSeriesSearchResponse(cleanedTitle, href, TvType.TvSeries) {
                 this.posterUrl = fixUrlNull(posterUrl)
                 this.posterHeaders = commonHeaders
             }
@@ -55,12 +60,14 @@ class ToonItaliaProvider : MainAPI() {
 
         return document.select("article").mapNotNull { article ->
             val titleHeader = article.selectFirst("h2.entry-title a") ?: return@mapNotNull null
-            val title = titleHeader.text()
+            val rawTitle = titleHeader.text()
+            val cleanedTitle = rawTitle.replace(titleCleaner, "").trim()
+            
             val href = titleHeader.attr("href")
             val img = article.selectFirst("img")
             val posterUrl = img?.attr("data-src")?.takeIf { it.isNotBlank() } ?: img?.attr("src")
 
-            newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
+            newTvSeriesSearchResponse(cleanedTitle, href, TvType.TvSeries) {
                 this.posterUrl = fixUrlNull(posterUrl)
                 this.posterHeaders = commonHeaders
             }
@@ -71,10 +78,8 @@ class ToonItaliaProvider : MainAPI() {
         val response = app.get(url, headers = commonHeaders)
         val document = response.document
         
-        // PULIZIA TITOLO PER TMDB: Rimuoviamo tutto ciò che confonde il database automatico
-        val title = document.selectFirst("h1.entry-title")?.text()
-            ?.replace(Regex("(?i)streaming|sub\\s?ita|serie tv|serie animata|tutte le stagioni|completa|raccolta|film"), "")
-            ?.trim() ?: ""
+        val rawTitle = document.selectFirst("h1.entry-title")?.text() ?: ""
+        val title = rawTitle.replace(titleCleaner, "").trim()
             
         val img = document.selectFirst("div.entry-content img, .post-thumbnail img")
         val poster = img?.attr("data-src")?.takeIf { it.isNotBlank() } ?: img?.attr("src")
@@ -112,7 +117,6 @@ class ToonItaliaProvider : MainAPI() {
                             this.name = "$epName ($hostName)"
                             this.season = s
                             this.episode = e
-                            // Utilizziamo il poster come anteprima: Cloudstream proverà a sostituirlo con TMDB
                             this.posterUrl = fixUrlNull(poster)
                         })
                     }
@@ -120,12 +124,10 @@ class ToonItaliaProvider : MainAPI() {
             }
         }
 
-        // Restituiamo la risposta ordinata
         return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes.sortedBy { it.episode }) {
             this.posterUrl = fixUrlNull(poster)
             this.posterHeaders = commonHeaders
             this.plot = plot
-            // Aggiungiamo un tag identificativo per aiutare il sistema di sync
             this.tags = listOf("ToonItalia")
         }
     }
@@ -136,7 +138,6 @@ class ToonItaliaProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val fixedUrl = fixHostUrl(data)
-        return loadExtractor(fixedUrl, subtitleCallback, callback)
+        return loadExtractor(fixHostUrl(data), subtitleCallback, callback)
     }
 }
