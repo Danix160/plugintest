@@ -1,5 +1,27 @@
 [
     {
+        "iconUrl": "https://onlineserietv.com/images/logo.svg",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/Danix160/plugintest",
+        "fileSize": 11454,
+        "status": 1,
+        "language": "it",
+        "authors": [
+            "Danix"
+        ],
+        "tvTypes": [
+            "Movie",
+            "TvSeries",
+            "Anime",
+            "Cartoon"
+        ],
+        "version": 1,
+        "internalName": "OnlineserieProvider",
+        "description": "Sito Streaming",
+        "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/OnlineserieProvider.cs3",
+        "name": "OnlineserieProvider"
+    },
+    {
         "iconUrl": "https://toonitalia.xyz/wp-content/uploads/2023/08/cropped-Majintoon-192x192.jpg",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/Danix160/plugintest",
