@@ -93,33 +93,42 @@ class ToonItaliaProvider : MainAPI() {
             val docLine = Jsoup.parseBodyFragment(line)
             val text = docLine.text().trim()
             
-            // Regex per identificare il numero episodio (es: "01 –" o "1x01")
+            // Cerchiamo il numero. Usiamo una regex che si assicura che il numero 
+            // sia all'inizio della riga o seguito da un separatore chiaro.
             val matchSimple = Regex("""^(\d+)\s*–""").find(text)
             val matchSE = Regex("""(\d+)[×x](\d+)""").find(text)
 
+            // Se non trova un numero chiaro all'inizio, saltiamo la riga (evita di contare immagini o titoli)
             val e = matchSE?.groupValues?.get(2)?.toIntOrNull() ?: matchSimple?.groupValues?.get(1)?.toIntOrNull()
             val s = matchSE?.groupValues?.get(1)?.toIntOrNull() ?: 1
 
-            if (e != null) {
-                // Pulizia del titolo episodio: togliamo il numero e i nomi dei server
+            // IMPORTANTE: Verifichiamo che la riga contenga effettivamente dei link <a> 
+            // e che il numero 'e' sia valido
+            val links = docLine.select("a")
+            if (e != null && links.isNotEmpty()) {
+                
+                // Pulizia del titolo episodio
                 var epName = text.split("–").getOrNull(1)?.trim() ?: "Episodio $e"
-                // Rimuoviamo eventuali residui di nomi server dal titolo
-                epName = epName.split("VOE", "LuluStream", "–", ignoreCase = true).first().trim()
+                epName = epName.split("VOE", "LuluStream", "–", "Openload", ignoreCase = true).first().trim()
 
-                docLine.select("a").forEach { a ->
+                links.forEach { a ->
                     val href = a.attr("href")
                     val hostName = a.text().trim()
                     
-                    if (href.isNotEmpty() && !href.startsWith("#") && href.contains("http")) {
+                    // Filtriamo ulteriormente per evitare link a immagini o pubblicità
+                    if (href.isNotEmpty() && href.contains("http") && !href.contains("jpg|png|jpeg".toRegex())) {
                         episodes.add(newEpisode(href) {
                             this.name = "$epName ($hostName)"
                             this.season = s
-                            this.episode = e
+                            this.episode = e // Assegna il numero estratto dalla riga
                         })
                     }
                 }
             }
         }
+
+        // FACOLTATIVO: Ordiniamo la lista per numero episodio per sicurezza
+        val sortedEpisodes = episodes.sortedBy { it.episode }
 
         return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
             this.posterUrl = fixUrlNull(poster)
