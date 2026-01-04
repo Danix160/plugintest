@@ -46,36 +46,41 @@ class OnlineserieProvider : MainAPI() { // Nome classe corretto qui
         "Referer" to mainUrl
     )
 
-    override suspend fun search(query: String): List<SearchResponse> {
-        val url = "$mainUrl/?s=${query.replace(" ", "+")}"
+    // 1. Aggiungi questo all'inizio della classe per dare più tempo al sito di rispondere
+override suspend fun search(query: String): List<SearchResponse> {
+    val url = "$mainUrl/?s=${query.replace(" ", "+")}"
+    
+    // Aumentiamo il timeout perché Cloudflare richiede tempo per la sfida
+    val response = app.get(
+        url, 
+        interceptor = cfKiller, 
+        headers = commonHeaders,
+        timeout = 120 // Aumentato a 120 secondi
+    )
+    
+    val document = response.document
+    
+    // Il selettore potrebbe aver bisogno di una pulizia
+    // Proviamo un selettore più generico per assicurarci di prendere i risultati
+    val items = document.select("article, .uagb-post__inner-wrap, .result-item")
+    
+    return items.mapNotNull { card ->
+        val titleElement = card.selectFirst("h2 a, h3 a, .uagb-post__title a") ?: return@mapNotNull null
+        val title = titleElement.text().trim()
+        val href = titleElement.attr("href")
         
-        // Usiamo cfKiller per gestire il blocco Cloudflare che abbiamo visto nei log
-        val response = app.get(
-            url, 
-            interceptor = cfKiller, 
-            headers = commonHeaders,
-            timeout = 60 
-        )
-        
-        val document = response.document
-        
-        // Cerchiamo gli articoli o i wrap dei post
-        return document.select("article, .uagb-post__inner-wrap").mapNotNull { card ->
-            // Cerchiamo il link del titolo
-            val titleElement = card.selectFirst("h2 a, h3 a, .uagb-post__title a") ?: return@mapNotNull null
-            val title = titleElement.text().trim()
-            val href = titleElement.attr("href")
-            
-            // Estraiamo l'immagine
-            val posterUrl = card.selectFirst("img")?.attr("src")
+        // Cerchiamo l'immagine in vari attributi (data-src è comune se c'è lazyload)
+        val img = card.selectFirst("img")
+        val posterUrl = img?.attr("data-src")?.ifEmpty { null } 
+                        ?: img?.attr("src")
 
-            newMovieSearchResponse(title, href, TvType.Movie) {
-                this.posterUrl = posterUrl
-                // Aggiungiamo gli headers specifici per i poster qui
-                this.posterHeaders = commonHeaders
-            }
+        newMovieSearchResponse(title, href, TvType.Movie) {
+            this.posterUrl = posterUrl
+            // FONDAMENTALE: senza questo avrai sempre l'errore 403 nei log
+            this.posterHeaders = commonHeaders 
         }
     }
+}
 
     override suspend fun load(url: String): LoadResponse {
         val response = app.get(url, interceptor = cfKiller)
