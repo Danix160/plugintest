@@ -1,8 +1,8 @@
 cloudstream {
     extra["prefix"] = "ToonItalia"
-    extra["displayName"] = "Toon Italia"
+    extra["displayName"] = "ToonItalia"
     
-    version = 8
+    version = 9
     description = "Archivio di Anime e Cartoni animati in italiano da ToonItalia.xyz"
     authors = listOf("Danix")
     
