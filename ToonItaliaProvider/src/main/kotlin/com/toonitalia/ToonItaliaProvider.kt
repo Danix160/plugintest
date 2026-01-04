@@ -19,7 +19,7 @@ class ToonItaliaProvider : MainAPI() {
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     )
 
-    // Regex universale per pulire i titoli e favorire il matching con TMDB
+    // Regex per pulire i titoli e favorire il matching automatico con TMDB/IMDb
     private val titleCleaner = Regex("(?i)streaming|sub\\s?ita|serie tv|serie animata|tutte le stagioni|completa|raccolta|film|animata")
 
     override val mainPage = mainPageOf(
@@ -44,7 +44,7 @@ class ToonItaliaProvider : MainAPI() {
             
             val href = titleHeader.attr("href")
             val img = article.selectFirst("img")
-            val posterUrl = img?.attr("data-src")?.takeIf { it.isNotBlank() } ?: img?.attr("src")
+            val posterUrl = img?.attr("data-src") ?: img?.attr("src")
 
             newTvSeriesSearchResponse(cleanedTitle, href, TvType.TvSeries) {
                 this.posterUrl = fixUrlNull(posterUrl)
@@ -65,7 +65,7 @@ class ToonItaliaProvider : MainAPI() {
             
             val href = titleHeader.attr("href")
             val img = article.selectFirst("img")
-            val posterUrl = img?.attr("data-src")?.takeIf { it.isNotBlank() } ?: img?.attr("src")
+            val posterUrl = img?.attr("data-src") ?: img?.attr("src")
 
             newTvSeriesSearchResponse(cleanedTitle, href, TvType.TvSeries) {
                 this.posterUrl = fixUrlNull(posterUrl)
@@ -82,7 +82,7 @@ class ToonItaliaProvider : MainAPI() {
         val title = rawTitle.replace(titleCleaner, "").trim()
             
         val img = document.selectFirst("div.entry-content img, .post-thumbnail img")
-        val poster = img?.attr("data-src")?.takeIf { it.isNotBlank() } ?: img?.attr("src")
+        val poster = img?.attr("data-src") ?: img?.attr("src")
                      
         val plot = document.select("div.entry-content p")
             .firstOrNull { it.text().length > 50 && !it.text().contains("VOE") }?.text()
@@ -90,8 +90,9 @@ class ToonItaliaProvider : MainAPI() {
         val episodes = mutableListOf<Episode>()
         val entryContent = document.selectFirst("div.entry-content")
         val htmlContent = entryContent?.html() ?: ""
-        val lines = htmlContent.split(Regex("<br\\s*/?>|</p>|</div>"))
 
+        // 1. LOGICA SERIE TV (Cerca episodi numerati)
+        val lines = htmlContent.split(Regex("<br\\s*/?>|</p>|</div>"))
         lines.forEach { line ->
             val docLine = Jsoup.parseBodyFragment(line)
             val text = docLine.text().trim()
@@ -104,17 +105,14 @@ class ToonItaliaProvider : MainAPI() {
 
             val links = docLine.select("a")
             if (e != null && links.isNotEmpty()) {
-                
                 var epName = text.split("–").getOrNull(1)?.trim() ?: "Episodio $e"
                 epName = epName.split("VOE", "LuluStream", "–", "Openload", ignoreCase = true).first().trim()
 
                 links.forEach { a ->
                     val href = a.attr("href")
-                    val hostName = a.text().trim()
-                    
                     if (href.isNotEmpty() && href.contains("http") && !href.contains("jpg|png|jpeg".toRegex())) {
                         episodes.add(newEpisode(href) {
-                            this.name = "$epName ($hostName)"
+                            this.name = "$epName (${a.text()})"
                             this.season = s
                             this.episode = e
                             this.posterUrl = fixUrlNull(poster)
@@ -124,20 +122,6 @@ class ToonItaliaProvider : MainAPI() {
             }
         }
 
-        return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes.sortedBy { it.episode }) {
-            this.posterUrl = fixUrlNull(poster)
-            this.posterHeaders = commonHeaders
-            this.plot = plot
-            this.tags = listOf("ToonItalia")
-        }
-    }
-
-    override suspend fun loadLinks(
-        data: String,
-        isCasting: Boolean,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ): Boolean {
-        return loadExtractor(fixHostUrl(data), subtitleCallback, callback)
-    }
-}
+        // 2. LOGICA FILM / FALLBACK (Se non ci sono episodi numerati o è un film)
+        if (episodes.isEmpty()) {
+            entryContent?.select("a")?.forEach { a ->
