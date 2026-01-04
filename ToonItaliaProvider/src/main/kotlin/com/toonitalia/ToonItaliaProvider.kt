@@ -9,7 +9,7 @@ import org.jsoup.Jsoup
 
 class ToonItaliaProvider : MainAPI() {
     override var mainUrl = "https://toonitalia.xyz"
-    override var name = "Toon Italia"
+    override var name = "ToonItalia"
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime, TvType.Cartoon)
     override var lang = "it"
     override val hasMainPage = true
