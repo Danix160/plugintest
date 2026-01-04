@@ -41,30 +41,34 @@ class OnlineserieProvider : MainAPI() { // Nome classe corretto qui
     }
 
    override suspend fun search(query: String): List<SearchResponse> {
-        // La ricerca standard di WP spesso richiede l'url-encoding
-        val response = app.get("$mainUrl/?s=$query", interceptor = cfKiller)
+        // Puliamo la query (sostituiamo gli spazi con + o lasciamoli per l'URL)
+        val cleanQuery = query.replace(" ", "+")
+        
+        // Usiamo il nuovo formato URL che abbiamo scoperto dal tuo log
+        val url = "$mainUrl/search/$cleanQuery/"
+        
+        val response = app.get(url, interceptor = cfKiller)
         val document = response.document
         
-        // Usiamo un selettore più generico per i post di WordPress
-        return document.select("article, .uagb-post__inner-wrap").mapNotNull { card ->
-            // Cerchiamo il titolo e il link
-            val titleElement = card.selectFirst(".uagb-post__title a, h2 a, h3 a") ?: return@mapNotNull null
+        // Proviamo i selettori tipici del tema WPMovies/Dooplay
+        // Solitamente i risultati sono in 'article' o '.result-item'
+        return document.select("article, .result-item, .uagb-post__inner-wrap").mapNotNull { card ->
+            // Cerchiamo il link e il titolo
+            val titleElement = card.selectFirst("h3 a, h2 a, .title a, .uagb-post__title a") ?: return@mapNotNull null
             val title = titleElement.text().trim()
-            val link = titleElement.attr("href")
+            val href = titleElement.attr("href")
             
-            // Gestione poster: controlliamo src, data-src e srcset
-            val imgElement = card.selectFirst("img")
-            val poster = imgElement?.attr("data-src")?.ifEmpty { 
-                imgElement.attr("src") 
-            }?.ifEmpty { 
-                imgElement.attr("data-lazy-src") 
-            }
+            // Per il poster, cerchiamo l'immagine nel contenitore
+            val img = card.selectFirst("img")
+            val posterUrl = img?.attr("data-src") 
+                ?: img?.attr("src") 
+                ?: img?.attr("data-lazy-src")
 
-            // Identifichiamo il tipo dal link o dalle categorie se presenti
-            val type = if (link.contains("/serietv/")) TvType.TvSeries else TvType.Movie
+            // Capiamo se è serie o film dall'URL
+            val type = if (href.contains("/serietv/")) TvType.TvSeries else TvType.Movie
 
-            newMovieSearchResponse(title, link, type) {
-                this.posterUrl = poster
+            newMovieSearchResponse(title, href, type) {
+                this.posterUrl = posterUrl
             }
         }
     }
