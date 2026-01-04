@@ -86,28 +86,32 @@ class ToonItaliaProvider : MainAPI() {
         val entryContent = document.selectFirst("div.entry-content")
         val htmlContent = entryContent?.html() ?: ""
         
-        // Split su vari tag per isolare ogni riga di episodio
         val lines = htmlContent.split(Regex("<br\\s*/?>|</p>|</div>|<li>|\\n"))
         
-        var autoEpCounter = 1 // Contatore di sicurezza
+        var autoEpCounter = 1
 
         lines.forEach { line ->
             val docLine = Jsoup.parseBodyFragment(line)
             val text = docLine.text().trim()
-            val links = docLine.select("a").filter { it.attr("href").contains("http") }
+            
+            // FILTRO SIGLE: Salta la riga se contiene queste parole
+            val isBonusContent = text.contains(Regex("(?i)sigla|opening|intro|ending|trailer"))
+            
+            val links = docLine.select("a").filter { a -> 
+                val href = a.attr("href")
+                // FILTRO WIKIPEDIA e link vuoti
+                href.contains("http") && !href.contains("wikipedia.org") && !isBonusContent
+            }
 
             if (links.isNotEmpty()) {
-                // Prova a estrarre S x E (es 1x05) o numero semplice (es 01)
                 val matchSE = Regex("""(\d+)[×x](\d+)""").find(text)
                 val matchSimple = Regex("""^(\d+)""").find(text)
 
                 val s = matchSE?.groupValues?.get(1)?.toIntOrNull() ?: 1
-                // Se non trova il numero nel testo, usa il contatore automatico
                 val e = matchSE?.groupValues?.get(2)?.toIntOrNull() 
                         ?: matchSimple?.groupValues?.get(1)?.toIntOrNull() 
                         ?: autoEpCounter
 
-                // Pulizia nome
                 var epName = text.replace(Regex("""^\d+[×x]\d+|^\d+"""), "").replace("–", "").trim()
                 epName = epName.split("VOE", "LuluStream", ignoreCase = true).first().trim()
                 if (epName.isEmpty()) epName = "Episodio $e"
@@ -124,7 +128,6 @@ class ToonItaliaProvider : MainAPI() {
                     }
                 }
                 
-                // Incrementa il contatore solo se abbiamo aggiunto qualcosa e non c'era un numero esplicito
                 if (matchSE == null && matchSimple == null) {
                     autoEpCounter++
                 } else if (e >= autoEpCounter) {
@@ -133,12 +136,13 @@ class ToonItaliaProvider : MainAPI() {
             }
         }
 
-        // FILM LOGIC (Fallback se non abbiamo trovato nulla con la logica sopra)
         if (episodes.isEmpty()) {
             entryContent?.select("a")?.forEach { a ->
                 val href = a.attr("href")
                 val linkText = a.text().trim()
-                if (href.contains("http") && (linkText.contains("VOE", true) || linkText.contains("Lulu", true))) {
+                // Applichiamo i filtri anche alla logica Film
+                if (href.contains("http") && !href.contains("wikipedia.org") && 
+                    (linkText.contains("VOE", true) || linkText.contains("Lulu", true))) {
                     episodes.add(newEpisode(href) {
                         this.name = "Film - $linkText"
                         this.posterUrl = poster
@@ -149,7 +153,6 @@ class ToonItaliaProvider : MainAPI() {
 
         val tvType = if (url.contains("film") || episodes.isEmpty()) TvType.Movie else TvType.TvSeries
 
-        // Rimuoviamo duplicati e ordiniamo
         val finalEpisodes = episodes.distinctBy { it.data }.sortedWith(compareBy({ it.season }, { it.episode }))
 
         return newTvSeriesLoadResponse(title, url, tvType, finalEpisodes) {
