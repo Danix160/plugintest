@@ -17,6 +17,7 @@ class OnlineserieProvider : MainAPI() { // Nome classe corretto qui
 
     override var mainPage = mainPageOf(
         mainUrl to "Ultime Serie TV",
+        "$mainUrl/serie-tv-generi/animazione/" to "Cartoon & Anime",
         "$mainUrl/movies/" to "Ultimi Film"
     )
 
@@ -39,12 +40,31 @@ class OnlineserieProvider : MainAPI() { // Nome classe corretto qui
         return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
     }
 
-    override suspend fun search(query: String): List<SearchResponse> {
+   override suspend fun search(query: String): List<SearchResponse> {
+        // La ricerca standard di WP spesso richiede l'url-encoding
         val response = app.get("$mainUrl/?s=$query", interceptor = cfKiller)
-        return response.document.select("article.uagb-post__inner-wrap").mapNotNull { card ->
-            val titleElement = card.selectFirst(".uagb-post__title a") ?: return@mapNotNull null
-            newMovieSearchResponse(titleElement.text(), titleElement.attr("href"), TvType.TvSeries) {
-                addPoster(card.selectFirst(".uagb-post__image img")?.attr("src"))
+        val document = response.document
+        
+        // Usiamo un selettore più generico per i post di WordPress
+        return document.select("article, .uagb-post__inner-wrap").mapNotNull { card ->
+            // Cerchiamo il titolo e il link
+            val titleElement = card.selectFirst(".uagb-post__title a, h2 a, h3 a") ?: return@mapNotNull null
+            val title = titleElement.text().trim()
+            val link = titleElement.attr("href")
+            
+            // Gestione poster: controlliamo src, data-src e srcset
+            val imgElement = card.selectFirst("img")
+            val poster = imgElement?.attr("data-src")?.ifEmpty { 
+                imgElement.attr("src") 
+            }?.ifEmpty { 
+                imgElement.attr("data-lazy-src") 
+            }
+
+            // Identifichiamo il tipo dal link o dalle categorie se presenti
+            val type = if (link.contains("/serietv/")) TvType.TvSeries else TvType.Movie
+
+            newMovieSearchResponse(title, link, type) {
+                this.posterUrl = poster
             }
         }
     }
