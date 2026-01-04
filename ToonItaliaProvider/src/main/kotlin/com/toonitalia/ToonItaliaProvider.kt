@@ -15,9 +15,9 @@ class ToonItaliaProvider : MainAPI() {
 
     // FIX 403: Forziamo un User-Agent comune per evitare i blocchi sui poster
     override val mainPage = mainPageOf(
-        "$mainUrl/" to "Ultime Aggiunte",
-        "$mainUrl/category/anime/" to "Anime",
-        "$mainUrl/category/cartoni-animati/" to "Cartoni Animati",
+        "$mainUrl/category/anime" to "Anime",
+        "$mainUrl/category/film-animazione/" to "Film Animazione",
+        "$mainUrl/category/serie-tv/" to "Serie TV",
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
