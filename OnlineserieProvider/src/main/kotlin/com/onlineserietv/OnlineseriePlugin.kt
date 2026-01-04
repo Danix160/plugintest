@@ -7,6 +7,6 @@ import android.content.Context
 class OnlineseriePlugin: Plugin() {
     override fun load(context: Context) {
         // Registra il provider definito sopra nella classe ToonItaliaProvider
-        registerMainAPI(OnlineserietvProvider())
+        registerMainAPI(OnlineserieProvider())
     }
 }
