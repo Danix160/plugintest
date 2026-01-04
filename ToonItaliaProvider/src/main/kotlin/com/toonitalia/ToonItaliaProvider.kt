@@ -19,6 +19,9 @@ class ToonItaliaProvider : MainAPI() {
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     )
 
+    // Regex centralizzata per pulire i titoli in Home, Ricerca e Caricamento
+    private val titleCleaner = Regex("(?i)streaming|sub\\s?ita|serie tv|serie animata|tutte le stagioni|completa|raccolta|film|animata")
+
     override val mainPage = mainPageOf(
         "$mainUrl/category/anime" to "Anime",
         "$mainUrl/category/film-animazione/" to "Film Animazione",
@@ -36,12 +39,14 @@ class ToonItaliaProvider : MainAPI() {
         val document = app.get(request.data, headers = commonHeaders).document
         val items = document.select("article").mapNotNull { article ->
             val titleHeader = article.selectFirst("h2.entry-title a") ?: return@mapNotNull null
-            val title = titleHeader.text()
+            val rawTitle = titleHeader.text()
+            val cleanedTitle = rawTitle.replace(titleCleaner, "").trim()
+            
             val href = titleHeader.attr("href")
             val img = article.selectFirst("img")
-            val posterUrl = img?.attr("data-src")?.takeIf { it.isNotBlank() } ?: img?.attr("src")
+            val posterUrl = img?.attr("data-src") ?: img?.attr("src")
 
-            newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
+            newTvSeriesSearchResponse(cleanedTitle, href, TvType.TvSeries) {
                 this.posterUrl = fixUrlNull(posterUrl)
                 this.posterHeaders = commonHeaders
             }
@@ -55,16 +60,19 @@ class ToonItaliaProvider : MainAPI() {
 
         return document.select("article").mapNotNull { article ->
             val titleHeader = article.selectFirst("h2.entry-title a") ?: return@mapNotNull null
-            val title = titleHeader.text()
+            val rawTitle = titleHeader.text()
+            val cleanedTitle = rawTitle.replace(titleCleaner, "").trim()
+            
             val href = titleHeader.attr("href")
             val img = article.selectFirst("img")
-            val posterUrl = img?.attr("data-src")?.takeIf { it.isNotBlank() } ?: img?.attr("src")
+            val posterUrl = img?.attr("data-src") ?: img?.attr("src") ?: img?.attr("data-lazy-src")
 
-            newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
+            newTvSeriesSearchResponse(cleanedTitle, href, TvType.TvSeries) {
                 this.posterUrl = fixUrlNull(posterUrl)
                 this.posterHeaders = commonHeaders
+                this.addQuality("HD")
             }
-        }
+        }.distinctBy { it.name }
     }
 
     override suspend fun load(url: String): LoadResponse {
@@ -74,8 +82,8 @@ class ToonItaliaProvider : MainAPI() {
         val rawTitle = document.selectFirst("h1.entry-title")?.text() ?: ""
         val title = rawTitle.replace(titleCleaner, "").trim()
             
-        val img = document.selectFirst("div.entry-content img, .post-thumbnail img")
-        val poster = img?.attr("data-src")?.takeIf { it.isNotBlank() } ?: img?.attr("src")
+        val img = document.selectFirst("div.entry-content img, .post-thumbnail img, .wp-post-image")
+        val poster = img?.attr("data-original") ?: img?.attr("data-src") ?: img?.attr("src") ?: img?.attr("data-lazy-src")
                      
         val plot = document.select("div.entry-content p")
             .firstOrNull { it.text().length > 50 && !it.text().contains("VOE") }?.text()
@@ -83,12 +91,13 @@ class ToonItaliaProvider : MainAPI() {
         val episodes = mutableListOf<Episode>()
         val entryContent = document.selectFirst("div.entry-content")
         val htmlContent = entryContent?.html() ?: ""
-        
-        // 1. PROVA A CERCARE EPISODI (Serie TV)
+
+        // 1. LOGICA SERIE TV: Cerca episodi numerati riga per riga
         val lines = htmlContent.split(Regex("<br\\s*/?>|</p>|</div>"))
         lines.forEach { line ->
             val docLine = Jsoup.parseBodyFragment(line)
             val text = docLine.text().trim()
+            
             val matchSimple = Regex("""^(\d+)\s*–""").find(text)
             val matchSE = Regex("""(\d+)[×x](\d+)""").find(text)
 
@@ -98,7 +107,7 @@ class ToonItaliaProvider : MainAPI() {
             val links = docLine.select("a")
             if (e != null && links.isNotEmpty()) {
                 var epName = text.split("–").getOrNull(1)?.trim() ?: "Episodio $e"
-                epName = epName.split("VOE", "LuluStream", "–", ignoreCase = true).first().trim()
+                epName = epName.split("VOE", "LuluStream", "–", "Openload", ignoreCase = true).first().trim()
 
                 links.forEach { a ->
                     val href = a.attr("href")
@@ -114,25 +123,27 @@ class ToonItaliaProvider : MainAPI() {
             }
         }
 
-        // 2. FALLBACK PER FILM (Se non ha trovato episodi)
+        // 2. LOGICA FILM / FALLBACK: Se non ha trovato episodi numerati, cerca i link diretti agli host
         if (episodes.isEmpty()) {
-            // Cerca tutti i link che portano a host video conosciuti
             entryContent?.select("a")?.forEach { a ->
                 val href = a.attr("href")
-                val text = a.text().toUpperCase()
+                val linkText = a.text().trim()
                 
-                // Se il link contiene host video o parole come VOE, Lulu, MixDrop
-                if (href.contains("http") && (text.contains("VOE") || text.contains("LULU") || text.contains("STREAM"))) {
+                if (href.contains("http") && 
+                    (linkText.contains("VOE", true) || 
+                     linkText.contains("Lulu", true) || 
+                     linkText.contains("Stream", true))) {
+                    
                     episodes.add(newEpisode(href) {
-                        this.name = "Film - ${a.text()}"
+                        this.name = "Film - $linkText"
                         this.posterUrl = fixUrlNull(poster)
                     })
                 }
             }
         }
 
-        // Determiniamo se è un film o una serie per il tipo di risposta
-        val tvType = if (url.contains("film") || episodes.size <= 3) TvType.Movie else TvType.TvSeries
+        // Determiniamo il tipo: se l'URL contiene "film" o ci sono pochissimi link, è un Film
+        val tvType = if (url.contains("film") || episodes.size <= 2) TvType.Movie else TvType.TvSeries
 
         return newTvSeriesLoadResponse(title, url, tvType, episodes.sortedBy { it.episode }) {
             this.posterUrl = fixUrlNull(poster)
@@ -148,7 +159,6 @@ class ToonItaliaProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val fixedUrl = fixHostUrl(data)
-        return loadExtractor(fixedUrl, subtitleCallback, callback)
+        return loadExtractor(fixHostUrl(data), subtitleCallback, callback)
     }
 }
