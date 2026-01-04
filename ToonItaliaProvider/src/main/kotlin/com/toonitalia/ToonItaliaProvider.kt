@@ -40,8 +40,12 @@ class ToonItaliaProvider : MainAPI() {
             val titleHeader = article.selectFirst("h2.entry-title a") ?: return@mapNotNull null
             val title = titleHeader.text()
             val href = titleHeader.attr("href")
+            
+            // RIPRISTINO LOGICA IMMAGINI HOME PAGE
             val img = article.selectFirst("img")
-            val posterUrl = img?.attr("data-src") ?: img?.attr("src")
+            val posterUrl = img?.attr("data-src")?.takeIf { it.isNotBlank() }
+                ?: img?.attr("data-lazy-src")?.takeIf { it.isNotBlank() }
+                ?: img?.attr("src")
 
             newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
                 this.posterUrl = fixUrlNull(posterUrl)
@@ -60,6 +64,7 @@ class ToonItaliaProvider : MainAPI() {
             val title = titleHeader.text()
             val href = titleHeader.attr("href")
             
+            // Rimane il logo solo qui per la ricerca
             newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
                 this.posterUrl = searchPlaceholderLogo
                 this.posterHeaders = commonHeaders
@@ -76,6 +81,7 @@ class ToonItaliaProvider : MainAPI() {
             
         val img = document.selectFirst("div.entry-content img, .post-thumbnail img")
         val poster = img?.attr("data-src")?.takeIf { it.isNotBlank() } 
+            ?: img?.attr("data-lazy-src")?.takeIf { it.isNotBlank() }
             ?: img?.attr("src")?.takeIf { it.isNotBlank() && !it.contains("placeholder") }
             ?: searchPlaceholderLogo
                      
@@ -94,12 +100,10 @@ class ToonItaliaProvider : MainAPI() {
             val docLine = Jsoup.parseBodyFragment(line)
             val text = docLine.text().trim()
             
-            // FILTRO SIGLE: Salta la riga se contiene queste parole
             val isBonusContent = text.contains(Regex("(?i)sigla|opening|intro|ending|trailer"))
             
             val links = docLine.select("a").filter { a -> 
                 val href = a.attr("href")
-                // FILTRO WIKIPEDIA e link vuoti
                 href.contains("http") && !href.contains("wikipedia.org") && !isBonusContent
             }
 
@@ -140,7 +144,6 @@ class ToonItaliaProvider : MainAPI() {
             entryContent?.select("a")?.forEach { a ->
                 val href = a.attr("href")
                 val linkText = a.text().trim()
-                // Applichiamo i filtri anche alla logica Film
                 if (href.contains("http") && !href.contains("wikipedia.org") && 
                     (linkText.contains("VOE", true) || linkText.contains("Lulu", true))) {
                     episodes.add(newEpisode(href) {
@@ -152,7 +155,6 @@ class ToonItaliaProvider : MainAPI() {
         }
 
         val tvType = if (url.contains("film") || episodes.isEmpty()) TvType.Movie else TvType.TvSeries
-
         val finalEpisodes = episodes.distinctBy { it.data }.sortedWith(compareBy({ it.season }, { it.episode }))
 
         return newTvSeriesLoadResponse(title, url, tvType, finalEpisodes) {
