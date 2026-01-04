@@ -14,7 +14,6 @@ class ToonItaliaProvider : MainAPI() {
     override var lang = "it"
     override val hasMainPage = true
 
-    // Headers per evitare l'errore 403 (Forbidden) sulle immagini e richieste
     private val commonHeaders = mapOf(
         "Referer" to "$mainUrl/",
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
@@ -26,7 +25,6 @@ class ToonItaliaProvider : MainAPI() {
         "$mainUrl/category/serie-tv/" to "Serie TV",
     )
 
-    // Converte i domini mascherati di ToonItalia in quelli reali per gli estrattori
     private fun fixHostUrl(url: String): String {
         return url
             .replace("chuckle-tube.com", "voe.sx")
@@ -41,7 +39,7 @@ class ToonItaliaProvider : MainAPI() {
             val title = titleHeader.text()
             val href = titleHeader.attr("href")
             val img = article.selectFirst("img")
-            val posterUrl = img?.attr("data-src")?.takeIf { it.isNotBlank() } ?: img?.attr("src")
+            val posterUrl = img?.attr("data-src") ?: img?.attr("src")
 
             newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
                 this.posterUrl = fixUrlNull(posterUrl)
@@ -60,7 +58,7 @@ class ToonItaliaProvider : MainAPI() {
             val title = titleHeader.text()
             val href = titleHeader.attr("href")
             val img = article.selectFirst("img")
-            val posterUrl = img?.attr("data-src")?.takeIf { it.isNotBlank() } ?: img?.attr("src")
+            val posterUrl = img?.attr("data-src") ?: img?.attr("src")
 
             newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
                 this.posterUrl = fixUrlNull(posterUrl)
@@ -73,64 +71,69 @@ class ToonItaliaProvider : MainAPI() {
         val response = app.get(url, headers = commonHeaders)
         val document = response.document
         
-        val title = document.selectFirst("h1.entry-title")?.text()
-            ?.replace(Regex("(?i)streaming|sub\\s?ita"), "")?.trim() ?: ""
+        val title = document.selectFirst("h1.entry-title")?.text() ?: ""
             
-        val img = document.selectFirst("div.entry-content img")
-        val poster = img?.attr("data-src")?.takeIf { it.isNotBlank() } ?: img?.attr("src")
+        val img = document.selectFirst("div.entry-content img, .post-thumbnail img, .wp-post-image")
+        val poster = img?.attr("data-original") ?: img?.attr("data-src") ?: img?.attr("src")
                      
         val plot = document.select("div.entry-content p")
             .firstOrNull { it.text().length > 50 && !it.text().contains("VOE") }?.text()
 
         val episodes = mutableListOf<Episode>()
         val entryContent = document.selectFirst("div.entry-content")
-
-        // FIX: Dividiamo il contenuto HTML per riga (<br> o </p>) per separare gli episodi
         val htmlContent = entryContent?.html() ?: ""
-        val lines = htmlContent.split(Regex("<br\\s*/?>|</p>|</div>"))
 
+        // 1. LOGICA SERIE TV
+        val lines = htmlContent.split(Regex("<br\\s*/?>|</p>|</div>"))
         lines.forEach { line ->
             val docLine = Jsoup.parseBodyFragment(line)
             val text = docLine.text().trim()
             
-            // Cerchiamo il numero. Usiamo una regex che si assicura che il numero 
-            // sia all'inizio della riga o seguito da un separatore chiaro.
             val matchSimple = Regex("""^(\d+)\s*–""").find(text)
             val matchSE = Regex("""(\d+)[×x](\d+)""").find(text)
 
-            // Se non trova un numero chiaro all'inizio, saltiamo la riga (evita di contare immagini o titoli)
             val e = matchSE?.groupValues?.get(2)?.toIntOrNull() ?: matchSimple?.groupValues?.get(1)?.toIntOrNull()
             val s = matchSE?.groupValues?.get(1)?.toIntOrNull() ?: 1
 
-            // IMPORTANTE: Verifichiamo che la riga contenga effettivamente dei link <a> 
-            // e che il numero 'e' sia valido
             val links = docLine.select("a")
             if (e != null && links.isNotEmpty()) {
-                
-                // Pulizia del titolo episodio
                 var epName = text.split("–").getOrNull(1)?.trim() ?: "Episodio $e"
-                epName = epName.split("VOE", "LuluStream", "–", "Openload", ignoreCase = true).first().trim()
+                epName = epName.split("VOE", "LuluStream", ignoreCase = true).first().trim()
 
                 links.forEach { a ->
                     val href = a.attr("href")
-                    val hostName = a.text().trim()
-                    
-                    // Filtriamo ulteriormente per evitare link a immagini o pubblicità
                     if (href.isNotEmpty() && href.contains("http") && !href.contains("jpg|png|jpeg".toRegex())) {
                         episodes.add(newEpisode(href) {
-                            this.name = "$epName ($hostName)"
+                            this.name = "$epName (${a.text()})"
                             this.season = s
-                            this.episode = e // Assegna il numero estratto dalla riga
+                            this.episode = e
                         })
                     }
                 }
             }
         }
 
-        // FACOLTATIVO: Ordiniamo la lista per numero episodio per sicurezza
-        val sortedEpisodes = episodes.sortedBy { it.episode }
+        // 2. LOGICA FILM (Fallback se non ci sono episodi numerati)
+        if (episodes.isEmpty()) {
+            entryContent?.select("a")?.forEach { a ->
+                val href = a.attr("href")
+                val linkText = a.text().trim()
+                
+                if (href.contains("http") && 
+                    (linkText.contains("VOE", true) || 
+                     linkText.contains("Lulu", true) || 
+                     linkText.contains("Stream", true))) {
+                    
+                    episodes.add(newEpisode(href) {
+                        this.name = "Film - $linkText"
+                    })
+                }
+            }
+        }
 
-        return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
+        val tvType = if (url.contains("film") || episodes.size <= 2) TvType.Movie else TvType.TvSeries
+
+        return newTvSeriesLoadResponse(title, url, tvType, episodes.sortedBy { it.episode }) {
             this.posterUrl = fixUrlNull(poster)
             this.posterHeaders = commonHeaders
             this.plot = plot
@@ -143,10 +146,6 @@ class ToonItaliaProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // Applichiamo il fix all'URL (chuckle-tube -> voe) prima di darlo a Cloudstream
-        val fixedUrl = fixHostUrl(data)
-        
-        // Carichiamo l'estrattore. Cloudstream proverà a risolvere il link rimpiazzato.
-        return loadExtractor(fixedUrl, subtitleCallback, callback)
+        return loadExtractor(fixHostUrl(data), subtitleCallback, callback)
     }
 }
