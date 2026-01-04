@@ -38,13 +38,8 @@ class ToonItaliaProvider : MainAPI() {
             val titleHeader = article.selectFirst("h2.entry-title a") ?: return@mapNotNull null
             val title = titleHeader.text()
             val href = titleHeader.attr("href")
-            
-            // Logica Fallback Immagine
             val img = article.selectFirst("img")
-            val posterUrl = img?.attr("data-src") 
-                ?: img?.attr("src") 
-                ?: img?.attr("data-lazy-src")
-                ?: "https://toonitalia.xyz/wp-content/uploads/2023/08/cropped-Majintoon-192x192.jpg" // Fallback icona sito
+            val posterUrl = img?.attr("data-src")?.takeIf { it.isNotBlank() } ?: img?.attr("src")
 
             newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
                 this.posterUrl = fixUrlNull(posterUrl)
@@ -62,13 +57,8 @@ class ToonItaliaProvider : MainAPI() {
             val titleHeader = article.selectFirst("h2.entry-title a") ?: return@mapNotNull null
             val title = titleHeader.text()
             val href = titleHeader.attr("href")
-            
-            // Nella ricerca le immagini spesso sono caricate in "lazy-load" o dentro i div post-thumbnail
-            val img = article.selectFirst(".post-thumbnail img, .entry-content img, img")
-            val posterUrl = img?.attr("data-src") 
-                ?: img?.attr("data-lazy-src")
-                ?: img?.attr("src")
-                ?: "https://toonitalia.xyz/wp-content/uploads/2023/08/cropped-Majintoon-192x192.jpg"
+            val img = article.selectFirst("img")
+            val posterUrl = img?.attr("data-src")?.takeIf { it.isNotBlank() } ?: img?.attr("src")
 
             newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
                 this.posterUrl = fixUrlNull(posterUrl)
@@ -81,18 +71,19 @@ class ToonItaliaProvider : MainAPI() {
         val response = app.get(url, headers = commonHeaders)
         val document = response.document
         
+        // PULIZIA TITOLO PER TMDB: Rimuoviamo tutto ciò che confonde il database automatico
         val title = document.selectFirst("h1.entry-title")?.text()
-            ?.replace(Regex("(?i)streaming|sub\\s?ita"), "")?.trim() ?: ""
+            ?.replace(Regex("(?i)streaming|sub\\s?ita|serie tv|serie animata|tutte le stagioni|completa|raccolta|film"), "")
+            ?.trim() ?: ""
             
         val img = document.selectFirst("div.entry-content img, .post-thumbnail img")
-        val poster = img?.attr("data-src") ?: img?.attr("src") ?: img?.attr("data-lazy-src")
+        val poster = img?.attr("data-src")?.takeIf { it.isNotBlank() } ?: img?.attr("src")
                      
         val plot = document.select("div.entry-content p")
             .firstOrNull { it.text().length > 50 && !it.text().contains("VOE") }?.text()
 
         val episodes = mutableListOf<Episode>()
         val entryContent = document.selectFirst("div.entry-content")
-
         val htmlContent = entryContent?.html() ?: ""
         val lines = htmlContent.split(Regex("<br\\s*/?>|</p>|</div>"))
 
@@ -108,28 +99,34 @@ class ToonItaliaProvider : MainAPI() {
 
             val links = docLine.select("a")
             if (e != null && links.isNotEmpty()) {
+                
                 var epName = text.split("–").getOrNull(1)?.trim() ?: "Episodio $e"
-                epName = epName.split("VOE", "LuluStream", "–", ignoreCase = true).first().trim()
+                epName = epName.split("VOE", "LuluStream", "–", "Openload", ignoreCase = true).first().trim()
 
                 links.forEach { a ->
                     val href = a.attr("href")
                     val hostName = a.text().trim()
                     
-                    if (href.isNotEmpty() && !href.startsWith("#") && href.contains("http")) {
+                    if (href.isNotEmpty() && href.contains("http") && !href.contains("jpg|png|jpeg".toRegex())) {
                         episodes.add(newEpisode(href) {
                             this.name = "$epName ($hostName)"
                             this.season = s
                             this.episode = e
+                            // Utilizziamo il poster come anteprima: Cloudstream proverà a sostituirlo con TMDB
+                            this.posterUrl = fixUrlNull(poster)
                         })
                     }
                 }
             }
         }
 
-        return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
+        // Restituiamo la risposta ordinata
+        return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes.sortedBy { it.episode }) {
             this.posterUrl = fixUrlNull(poster)
             this.posterHeaders = commonHeaders
             this.plot = plot
+            // Aggiungiamo un tag identificativo per aiutare il sistema di sync
+            this.tags = listOf("ToonItalia")
         }
     }
 
