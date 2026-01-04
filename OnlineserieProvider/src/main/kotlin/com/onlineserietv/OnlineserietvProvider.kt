@@ -3,10 +3,10 @@ package com.onlineserietv
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.network.CloudflareKiller
-import org.jsoup.nodes.Document
+import com.lagradost.cloudstream3.utils.AppUtils.loadExtractor
 
-class OnlineserieProvider : MainAPI() { // Nome classe corretto qui
-    
+class OnlineserieProvider : MainAPI() {
+
     override var mainUrl = "https://onlineserietv.com"
     override var name = "OnlineSerieTV"
     override val supportedTypes = setOf(TvType.TvSeries, TvType.Movie, TvType.Cartoon)
@@ -14,7 +14,12 @@ class OnlineserieProvider : MainAPI() { // Nome classe corretto qui
     override val hasMainPage = true
 
     private val cfKiller = CloudflareKiller()
-    private val userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0"
+
+    private val commonHeaders = mapOf(
+        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Referer" to "$mainUrl/",
+        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+    )
 
     override var mainPage = mainPageOf(
         mainUrl to "Ultime Serie TV",
@@ -22,80 +27,78 @@ class OnlineserieProvider : MainAPI() { // Nome classe corretto qui
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val url = if (page > 1) "${request.data}/page/$page/" else request.data
-        val response = app.get(url, interceptor = cfKiller, headers = mapOf("User-Agent" to userAgent))
+        val url = if (page > 1) "${request.data}page/$page/" else request.data
+        val response = app.get(url, interceptor = cfKiller, headers = commonHeaders)
         val document = response.document
-        
-        val items = document.select("article.uagb-post__inner-wrap").mapNotNull { card ->
-            val titleElement = card.selectFirst(".uagb-post__title a")
-            val title = titleElement?.text() ?: return@mapNotNull null
+
+        val items = document.select("article, .uagb-post__inner-wrap").mapNotNull { card ->
+            val titleElement = card.selectFirst(".uagb-post__title a, h2 a, h3 a")
+            val title = titleElement?.text()?.trim() ?: return@mapNotNull null
             val link = titleElement.attr("href")
-            val poster = card.selectFirst(".uagb-post__image img")?.attr("src")
+            val img = card.selectFirst("img")
+            val poster = img?.attr("data-src")?.ifEmpty { null } ?: img?.attr("src")
             val type = if (link.contains("/serietv/")) TvType.TvSeries else TvType.Movie
 
             newMovieSearchResponse(title, link, type) {
-                addPoster(poster)
+                this.posterUrl = poster
+                this.posterHeaders = commonHeaders
             }
         }
         return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
     }
-    
-        // Definiamo gli headers globali all'inizio della classe
-    private val commonHeaders = mapOf(
-        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Referer" to mainUrl
-    )
 
-    // 1. Aggiungi questo all'inizio della classe per dare più tempo al sito di rispondere
-override suspend fun search(query: String): List<SearchResponse> {
-    val url = "$mainUrl/?s=${query.replace(" ", "+")}"
-    
-    // Aumentiamo il timeout perché Cloudflare richiede tempo per la sfida
-    val response = app.get(
-        url, 
-        interceptor = cfKiller, 
-        headers = commonHeaders,
-        timeout = 120 // Aumentato a 120 secondi
-    )
-    
-    val document = response.document
-    
-    // Il selettore potrebbe aver bisogno di una pulizia
-    // Proviamo un selettore più generico per assicurarci di prendere i risultati
-    val items = document.select("article, .uagb-post__inner-wrap, .result-item")
-    
-    return items.mapNotNull { card ->
-        val titleElement = card.selectFirst("h2 a, h3 a, .uagb-post__title a") ?: return@mapNotNull null
-        val title = titleElement.text().trim()
-        val href = titleElement.attr("href")
-        
-        // Cerchiamo l'immagine in vari attributi (data-src è comune se c'è lazyload)
-        val img = card.selectFirst("img")
-        val posterUrl = img?.attr("data-src")?.ifEmpty { null } 
-                        ?: img?.attr("src")
+    override suspend fun search(query: String): List<SearchResponse> {
+        val url = "$mainUrl/?s=${query.replace(" ", "+")}"
+        val response = app.get(url, interceptor = cfKiller, headers = commonHeaders)
+        val document = response.document
 
-        newMovieSearchResponse(title, href, TvType.Movie) {
-            this.posterUrl = posterUrl
-            // FONDAMENTALE: senza questo avrai sempre l'errore 403 nei log
-            this.posterHeaders = commonHeaders 
+        return document.select("article, .uagb-post__inner-wrap").mapNotNull { card ->
+            val titleElement = card.selectFirst("h2 a, h3 a, .uagb-post__title a") ?: return@mapNotNull null
+            val title = titleElement.text().trim()
+            val href = titleElement.attr("href")
+            val img = card.selectFirst("img")
+            val posterUrl = img?.attr("data-src")?.ifEmpty { null } ?: img?.attr("src")
+
+            newMovieSearchResponse(title, href, TvType.Movie) {
+                this.posterUrl = posterUrl
+                this.posterHeaders = commonHeaders
+            }
         }
     }
-}
 
     override suspend fun load(url: String): LoadResponse {
-        val response = app.get(url, interceptor = cfKiller)
+        val response = app.get(url, interceptor = cfKiller, headers = commonHeaders)
         val document = response.document
-        val title = document.selectFirst("h1")?.text()?.trim() ?: ""
-        val poster = document.selectFirst(".uagb-post__image img")?.attr("src")
+        val title = document.selectFirst("h1.uagb-post__title, h1")?.text()?.trim() ?: ""
+        
+        val poster = document.selectFirst(".uagb-post__image img, .wp-block-image img, article img")?.let {
+            it.attr("data-src").ifEmpty { it.attr("src") }
+        }
+
         val isMovie = !url.contains("/serietv/")
 
         return if (isMovie) {
-            newMovieLoadResponse(title, url, TvType.Movie, url) { addPoster(poster) }
-        } else {
-            val episodes = document.select(".entry-content a[href*='/serietv/']").mapNotNull {
-                newEpisode(it.attr("href")) { name = it.text().trim() }
+            newMovieLoadResponse(title, url, TvType.Movie, url) {
+                this.posterUrl = poster
+                this.posterHeaders = commonHeaders
             }
-            newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) { addPoster(poster) }
+        } else {
+            // Estrazione episodi: cerca link che contengono la struttura delle puntate
+            val episodes = document.select(".entry-content a, .uagb-post__text a").mapNotNull {
+                val href = it.attr("href")
+                val text = it.text().trim()
+                // Filtra per link che sembrano episodi (spesso contengono numeri o "Episodio")
+                if (href.contains(url) && href != url || href.contains("/vai/")) {
+                    newEpisode(href) {
+                        this.name = text
+                    }
+                } else null
+            }.distinctBy { it.data }
+
+            newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
+                this.posterUrl = poster
+                this.posterHeaders = commonHeaders
+            }
         }
     }
 
@@ -105,26 +108,33 @@ override suspend fun search(query: String): List<SearchResponse> {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val response = app.get(data, interceptor = cfKiller)
-        val iframeSrc = response.document.select("iframe[src*='/streaming-']").attr("src")
+        // Se il link è un redirect "/vai/", lo risolviamo prima
+        val actualUrl = if (data.contains("/vai/")) bypassVai(data) ?: data else data
         
-        if (iframeSrc.isNotEmpty()) {
-            val iframeRes = app.get(iframeSrc, referer = data, interceptor = cfKiller)
-            iframeRes.document.select("a[href], iframe[src], button[data-link]").forEach { el ->
-                var finalUrl = el.attr("src").ifEmpty { el.attr("href").ifEmpty { el.attr("data-link") } }
-                if (finalUrl.isNotEmpty()) {
-                    if (finalUrl.contains("/vai/")) finalUrl = bypassVai(finalUrl) ?: ""
-                    if (finalUrl.isNotEmpty() && !finalUrl.contains("onlineserietv.com")) {
-                        loadExtractor(finalUrl, iframeSrc, subtitleCallback, callback)
-                    }
-                }
-            }
+        val response = app.get(actualUrl, interceptor = cfKiller, headers = commonHeaders)
+        val document = response.document
+
+        // Cerca iframe o link diretti ai player (es. DeltaBit, MixDrop, StreamWish)
+        document.select("iframe[src*='streaming'], iframe[src*='player'], .entry-content iframe").forEach { iframe ->
+            val src = iframe.attr("src")
+            loadExtractor(src, actualUrl, subtitleCallback, callback)
         }
+
+        // Cerca anche link testuali ai video
+        document.select(".entry-content a[href*='wish'], .entry-content a[href*='bit']").forEach { a ->
+            val href = a.attr("href")
+            loadExtractor(href, actualUrl, subtitleCallback, callback)
+        }
+
         return true
     }
 
     private suspend fun bypassVai(url: String): String? {
-        val res = app.get(url, interceptor = cfKiller, allowRedirects = true)
-        return if (res.url == url) null else res.url
+        // Alcuni link passano per una pagina intermedia, questo prova a recuperare l'URL finale
+        val res = app.get(url, interceptor = cfKiller, headers = commonHeaders, allowRedirects = true)
+        return if (res.url == url) {
+            // Se non ha redirectato, cerchiamo un link nella pagina
+            res.document.selectFirst("a.btn-server, .entry-content a")?.attr("href")
+        } else res.url
     }
 }
