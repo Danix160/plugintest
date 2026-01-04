@@ -3,7 +3,7 @@ package com.onlineserietv
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.network.CloudflareKiller
-import com.lagradost.cloudstream3.utils.AppUtils.loadExtractor
+// Import rimosso: AppUtils.loadExtractor (causava l'errore)
 
 class OnlineserieProvider : MainAPI() {
 
@@ -83,12 +83,10 @@ class OnlineserieProvider : MainAPI() {
                 this.posterHeaders = commonHeaders
             }
         } else {
-            // Estrazione episodi: cerca link che contengono la struttura delle puntate
             val episodes = document.select(".entry-content a, .uagb-post__text a").mapNotNull {
                 val href = it.attr("href")
                 val text = it.text().trim()
-                // Filtra per link che sembrano episodi (spesso contengono numeri o "Episodio")
-                if (href.contains(url) && href != url || href.contains("/vai/")) {
+                if ((href.contains(url) && href != url) || href.contains("/vai/")) {
                     newEpisode(href) {
                         this.name = text
                     }
@@ -108,20 +106,18 @@ class OnlineserieProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // Se il link è un redirect "/vai/", lo risolviamo prima
         val actualUrl = if (data.contains("/vai/")) bypassVai(data) ?: data else data
         
         val response = app.get(actualUrl, interceptor = cfKiller, headers = commonHeaders)
         val document = response.document
 
-        // Cerca iframe o link diretti ai player (es. DeltaBit, MixDrop, StreamWish)
+        // Usiamo la funzione loadExtractor direttamente (senza AppUtils.)
         document.select("iframe[src*='streaming'], iframe[src*='player'], .entry-content iframe").forEach { iframe ->
             val src = iframe.attr("src")
             loadExtractor(src, actualUrl, subtitleCallback, callback)
         }
 
-        // Cerca anche link testuali ai video
-        document.select(".entry-content a[href*='wish'], .entry-content a[href*='bit']").forEach { a ->
+        document.select(".entry-content a[href*='wish'], .entry-content a[href*='bit'], .entry-content a[href*='drop']").forEach { a ->
             val href = a.attr("href")
             loadExtractor(href, actualUrl, subtitleCallback, callback)
         }
@@ -130,10 +126,8 @@ class OnlineserieProvider : MainAPI() {
     }
 
     private suspend fun bypassVai(url: String): String? {
-        // Alcuni link passano per una pagina intermedia, questo prova a recuperare l'URL finale
         val res = app.get(url, interceptor = cfKiller, headers = commonHeaders, allowRedirects = true)
         return if (res.url == url) {
-            // Se non ha redirectato, cerchiamo un link nella pagina
             res.document.selectFirst("a.btn-server, .entry-content a")?.attr("href")
         } else res.url
     }
