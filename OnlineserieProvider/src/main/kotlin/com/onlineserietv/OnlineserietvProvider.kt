@@ -17,7 +17,6 @@ class OnlineserieProvider : MainAPI() { // Nome classe corretto qui
 
     override var mainPage = mainPageOf(
         mainUrl to "Ultime Serie TV",
-        "$mainUrl/serie-tv-generi/animazione/" to "Cartoon & Anime",
         "$mainUrl/movies/" to "Ultimi Film"
     )
 
@@ -41,41 +40,44 @@ class OnlineserieProvider : MainAPI() { // Nome classe corretto qui
     }
 
    override suspend fun search(query: String): List<SearchResponse> {
-    // OnlineSerieTV usa sia ?s= che /search/
-    // Proviamo la via più compatibile con gli headers corretti
-    val url = "$mainUrl/?s=${query.replace(" ", "+")}"
-    
-    val response = app.get(
-        url, 
-        interceptor = cfKiller, 
-        headers = mapOf("User-Agent" to userAgent)
-    )
-    
-    val document = response.document
-    
-    // Il contenitore principale per i risultati in questo tema 
-    // solitamente è 'article' o '.uagb-post__inner-wrap'
-    val items = document.select("article, .uagb-post__inner-wrap, .post-item").mapNotNull { card ->
-        // Cerchiamo il link del titolo
-        val titleElement = card.selectFirst(".uagb-post__title a, h2 a, h3 a") ?: return@mapNotNull null
-        val title = titleElement.text().trim()
-        val link = titleElement.attr("href")
+        val url = "$mainUrl/?s=${query.replace(" ", "+")}"
         
-        // Cerchiamo il poster in modo più aggressivo
-        val img = card.selectFirst("img")
-        val poster = img?.attr("data-src")?.ifEmpty { img.attr("src") }
-            ?: img?.attr("data-lazy-src")
-            ?: img?.attr("srcset")?.split(" ")?.firstOrNull() // Prende la prima immagine se c'è srcset
+        // Creiamo una mappa di headers completa per simulare un browser vero
+        val searchHeaders = mapOf(
+            "User-Agent" to userAgent,
+            "Referer" to "$mainUrl/",
+            "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language" to "it-IT,it;q=0.8,en-US;q=0.5,en;q=0.3"
+        )
 
-        val type = if (link.contains("/serietv/")) TvType.TvSeries else TvType.Movie
+        val response = app.get(
+            url, 
+            interceptor = cfKiller, 
+            headers = searchHeaders
+        )
+        
+        val document = response.document
+        
+        // Il selettore deve essere il più generico possibile per i risultati di WP
+        return document.select("article, .uagb-post__inner-wrap, .result-item").mapNotNull { card ->
+            val titleElement = card.selectFirst(".uagb-post__title a, h2 a, h3 a, .entry-title a") ?: return@mapNotNull null
+            val title = titleElement.text().trim()
+            val href = titleElement.attr("href")
+            
+            val img = card.selectFirst("img")
+            // Spesso il problema del 403 sui poster è risolvibile usando l'URL assoluto
+            val posterUrl = (img?.attr("data-src")?.ifEmpty { img.attr("src") }
+                ?: img?.attr("data-lazy-src"))?.let { fixUrl(it) }
 
-        newMovieSearchResponse(title, link, type) {
-            this.posterUrl = poster
+            val type = if (href.contains("/serietv/")) TvType.TvSeries else TvType.Movie
+
+            newMovieSearchResponse(title, href, type) {
+                this.posterUrl = posterUrl
+                // Aggiungiamo gli headers anche al poster per evitare il 403 durante il caricamento in app
+                this.posterHeaders = searchHeaders 
+            }
         }
     }
-    
-    return items
-}
 
     override suspend fun load(url: String): LoadResponse {
         val response = app.get(url, interceptor = cfKiller)
