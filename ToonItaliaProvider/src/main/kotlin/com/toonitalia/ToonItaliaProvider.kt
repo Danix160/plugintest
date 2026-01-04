@@ -41,7 +41,7 @@ class ToonItaliaProvider : MainAPI() {
             val title = titleHeader.text()
             val href = titleHeader.attr("href")
             val img = article.selectFirst("img")
-            val posterUrl = img?.attr("data-src")?.takeIf { it.isNotBlank() } ?: img?.attr("src")
+            val posterUrl = img?.attr("data-src") ?: img?.attr("src")
 
             newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
                 this.posterUrl = fixUrlNull(posterUrl)
@@ -86,30 +86,35 @@ class ToonItaliaProvider : MainAPI() {
         val entryContent = document.selectFirst("div.entry-content")
         val htmlContent = entryContent?.html() ?: ""
         
-        // Split più accurato per gestire meglio le righe degli episodi
-        val lines = htmlContent.split(Regex("<br\\s*/?>|</p>|</div>|<li>")).filter { it.contains("href") }
+        // Split su vari tag per isolare ogni riga di episodio
+        val lines = htmlContent.split(Regex("<br\\s*/?>|</p>|</div>|<li>|\\n"))
+        
+        var autoEpCounter = 1 // Contatore di sicurezza
 
         lines.forEach { line ->
             val docLine = Jsoup.parseBodyFragment(line)
             val text = docLine.text().trim()
-            
-            // Regex migliorata per catturare l'episodio senza saltare il primo
-            val matchSE = Regex("""(\d+)[×x](\d+)""").find(text)
-            val matchSimple = Regex("""^(\d+)""").find(text)
+            val links = docLine.select("a").filter { it.attr("href").contains("http") }
 
-            val s = matchSE?.groupValues?.get(1)?.toIntOrNull() ?: 1
-            val e = matchSE?.groupValues?.get(2)?.toIntOrNull() ?: matchSimple?.groupValues?.get(1)?.toIntOrNull()
+            if (links.isNotEmpty()) {
+                // Prova a estrarre S x E (es 1x05) o numero semplice (es 01)
+                val matchSE = Regex("""(\d+)[×x](\d+)""").find(text)
+                val matchSimple = Regex("""^(\d+)""").find(text)
 
-            val links = docLine.select("a")
-            if (e != null && links.isNotEmpty()) {
-                // Pulizia nome episodio
+                val s = matchSE?.groupValues?.get(1)?.toIntOrNull() ?: 1
+                // Se non trova il numero nel testo, usa il contatore automatico
+                val e = matchSE?.groupValues?.get(2)?.toIntOrNull() 
+                        ?: matchSimple?.groupValues?.get(1)?.toIntOrNull() 
+                        ?: autoEpCounter
+
+                // Pulizia nome
                 var epName = text.replace(Regex("""^\d+[×x]\d+|^\d+"""), "").replace("–", "").trim()
                 epName = epName.split("VOE", "LuluStream", ignoreCase = true).first().trim()
                 if (epName.isEmpty()) epName = "Episodio $e"
 
                 links.forEach { a ->
                     val href = a.attr("href")
-                    if (href.isNotEmpty() && href.contains("http") && !href.contains("jpg|png|jpeg".toRegex())) {
+                    if (!href.contains("jpg|png|jpeg".toRegex())) {
                         episodes.add(newEpisode(href) {
                             this.name = "$epName (${a.text()})"
                             this.season = s
@@ -118,10 +123,17 @@ class ToonItaliaProvider : MainAPI() {
                         })
                     }
                 }
+                
+                // Incrementa il contatore solo se abbiamo aggiunto qualcosa e non c'era un numero esplicito
+                if (matchSE == null && matchSimple == null) {
+                    autoEpCounter++
+                } else if (e >= autoEpCounter) {
+                    autoEpCounter = e + 1
+                }
             }
         }
 
-        // FILM LOGIC (Fallback)
+        // FILM LOGIC (Fallback se non abbiamo trovato nulla con la logica sopra)
         if (episodes.isEmpty()) {
             entryContent?.select("a")?.forEach { a ->
                 val href = a.attr("href")
@@ -137,7 +149,7 @@ class ToonItaliaProvider : MainAPI() {
 
         val tvType = if (url.contains("film") || episodes.isEmpty()) TvType.Movie else TvType.TvSeries
 
-        // Usiamo un distinctBy per evitare duplicati che sballano la numerazione dell'app
+        // Rimuoviamo duplicati e ordiniamo
         val finalEpisodes = episodes.distinctBy { it.data }.sortedWith(compareBy({ it.season }, { it.episode }))
 
         return newTvSeriesLoadResponse(title, url, tvType, finalEpisodes) {
