@@ -37,7 +37,7 @@
             "Anime",
             "Cartoon"
         ],
-        "version": 1,
+        "version": 2,
         "internalName": "TantiFilmProvider",
         "description": "Film e Serie TV",
         "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/TantiFilmProvider.cs3",
