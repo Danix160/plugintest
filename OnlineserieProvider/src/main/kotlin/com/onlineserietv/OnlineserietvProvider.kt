@@ -6,12 +6,6 @@ import com.lagradost.cloudstream3.network.CloudflareKiller
 import org.jsoup.nodes.Document
 
 class OnlineserieProvider : MainAPI() { // Nome classe corretto qui
-
-     // Definiamo gli headers globali all'inizio della classe
-    private val commonHeaders = mapOf(
-        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Referer" to mainUrl
-    )
     
     override var mainUrl = "https://onlineserietv.com"
     override var name = "OnlineSerieTV"
@@ -45,6 +39,12 @@ class OnlineserieProvider : MainAPI() { // Nome classe corretto qui
         }
         return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
     }
+    
+        // Definiamo gli headers globali all'inizio della classe
+    private val commonHeaders = mapOf(
+        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer" to mainUrl
+    )
 
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/?s=${query.replace(" ", "+")}"
