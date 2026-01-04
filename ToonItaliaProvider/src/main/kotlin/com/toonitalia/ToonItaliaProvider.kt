@@ -77,7 +77,6 @@ class ToonItaliaProvider : MainAPI() {
         val plot = document.select("div.entry-content p").firstOrNull { it.text().length > 50 && !it.text().contains("VOE") }?.text()
 
         val episodes = mutableListOf<Episode>()
-        var foundTrailerUrl: String? = null
         val entryContent = document.selectFirst("div.entry-content")
         val isMovieUrl = url.contains("film") || url.contains("film-animazione")
         
@@ -88,6 +87,7 @@ class ToonItaliaProvider : MainAPI() {
             val docLine = Jsoup.parseBodyFragment(line)
             val text = docLine.text().trim()
             
+            // Verifichiamo se è una sigla/opening
             val isTrailerRow = text.contains(Regex("(?i)sigla|opening|intro|ending|trailer"))
             
             val validLinks = docLine.select("a").filter { a -> 
@@ -99,23 +99,25 @@ class ToonItaliaProvider : MainAPI() {
             }
 
             if (validLinks.isNotEmpty()) {
-                if (isTrailerRow && foundTrailerUrl == null) {
-                    foundTrailerUrl = validLinks.first().attr("href")
-                    return@forEach 
-                }
-
                 val matchSE = Regex("""(\d+)[×x](\d+)""").find(text)
                 val matchSimple = Regex("""^(\d+)""").find(text)
 
-                val s = if (isMovieUrl) null else (matchSE?.groupValues?.get(1)?.toIntOrNull() ?: 1)
-                val e = if (isMovieUrl) null else (matchSE?.groupValues?.get(2)?.toIntOrNull() ?: matchSimple?.groupValues?.get(1)?.toIntOrNull() ?: autoEpCounter)
+                // Usiamo Stagione 0 per le sigle per metterle in cima ed evitare errori di riferimento
+                val s = if (isTrailerRow) 0 else if (isMovieUrl) null else (matchSE?.groupValues?.get(1)?.toIntOrNull() ?: 1)
+                val e = if (isTrailerRow) 0 else if (isMovieUrl) null else (matchSE?.groupValues?.get(2)?.toIntOrNull() ?: matchSimple?.groupValues?.get(1)?.toIntOrNull() ?: autoEpCounter)
 
                 val dataUrls = validLinks.map { it.attr("href") }.joinToString("###")
                 
                 var epName = text.replace(Regex("""^\d+[×x]\d+|^\d+"""), "").replace("–", "").trim()
                 epName = epName.split("VOE", "LuluStream", "Lulu", "Streaming", ignoreCase = true).first().trim()
                 
-                if (epName.isEmpty()) epName = if (isMovieUrl) "Film" else "Episodio $e"
+                if (epName.isEmpty()) {
+                    epName = when {
+                        isTrailerRow -> "✨ Sigla / Opening"
+                        isMovieUrl -> "Film"
+                        else -> "Episodio $e"
+                    }
+                }
 
                 episodes.add(newEpisode(dataUrls) {
                     this.name = epName
@@ -124,7 +126,7 @@ class ToonItaliaProvider : MainAPI() {
                     this.posterUrl = poster
                 })
 
-                if (!isMovieUrl) {
+                if (!isMovieUrl && !isTrailerRow) {
                     if (matchSE == null && matchSimple == null) autoEpCounter++ 
                     else if (e != null && e >= autoEpCounter) autoEpCounter = e + 1
                 }
@@ -135,14 +137,10 @@ class ToonItaliaProvider : MainAPI() {
         val finalEpisodes = episodes.distinctBy { it.name + it.episode.toString() }
             .sortedWith(compareBy({ it.season ?: 0 }, { it.episode ?: 0 }))
 
-        // CORREZIONE BUILD: trailerUrl rimosso e sostituito con addTrailer
         return newTvSeriesLoadResponse(title, url, tvType, finalEpisodes) {
             this.posterUrl = poster
             this.posterHeaders = commonHeaders
             this.plot = plot
-            if (foundTrailerUrl != null) {
-                addTrailer(fixHostUrl(foundTrailerUrl!!))
-            }
         }
     }
 
