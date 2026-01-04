@@ -5,10 +5,10 @@ import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.MainAPI
 import com.lagradost.cloudstream3.TvType
-import org.jsoup.Jsoup
+import org.jsoup.nodes.Element
 
 class TantiFilmProvider : MainAPI() {
-    override var mainUrl = "http://tanti-film.stream"
+    override var mainUrl = "https://tanti-film.stream" // Usiamo HTTPS
     override var name = "TantiFilm"
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
     override var lang = "it"
@@ -16,7 +16,9 @@ class TantiFilmProvider : MainAPI() {
 
     private val commonHeaders = mapOf(
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Referer" to "$mainUrl/"
+        "Referer" to "$mainUrl/",
+        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language" to "it-IT,it;q=0.8,en-US;q=0.5,en;q=0.3",
     )
 
     override val mainPage = mainPageOf(
@@ -28,16 +30,14 @@ class TantiFilmProvider : MainAPI() {
         val url = if (page <= 1) request.data else "${request.data}page/$page/"
         val document = app.get(url, headers = commonHeaders).document
         
-        // Selettori mirati per la struttura "DooPlay" di TantiFilm
-        val items = document.select("div.items article, div.quad_blog, div.result-item").mapNotNull { element ->
-            val link = element.selectFirst("div.poster a, div.image a, h3 a") ?: return@mapNotNull null
-            val title = element.selectFirst("div.data h3 a, h2 a, h3 a")?.text()?.trim() 
-                ?: element.selectFirst("img")?.attr("alt")?.trim() 
-                ?: "Senza Titolo"
+        // Selettore espanso: articoli o div all'interno del contenuto principale
+        val items = document.select("div#archive-content article, div.items article, article.item").mapNotNull { element ->
+            val titleHeader = element.selectFirst("div.data h3 a, h3 a, h2 a") ?: return@mapNotNull null
+            val title = titleHeader.text().trim()
+            val href = fixUrl(titleHeader.attr("href"))
             
-            val href = fixUrl(link.attr("href"))
             val img = element.selectFirst("img")
-            val posterUrl = img?.attr("data-src") ?: img?.attr("data-lazy-src") ?: img?.attr("src")
+            val posterUrl = img?.attr("data-src") ?: img?.attr("src")
 
             newMovieSearchResponse(title, href, TvType.Movie) {
                 this.posterUrl = fixUrlNull(posterUrl)
@@ -51,8 +51,8 @@ class TantiFilmProvider : MainAPI() {
         val document = app.get(url, headers = commonHeaders).document
 
         return document.select("div.result-item, article.item").mapNotNull { element ->
-            val link = element.selectFirst("div.image a, div.poster a") ?: return@mapNotNull null
-            val title = element.selectFirst("div.details div.title a")?.text()?.trim() 
+            val link = element.selectFirst("div.image a, div.poster a, h3 a") ?: return@mapNotNull null
+            val title = element.selectFirst("div.details div.title a, h3 a")?.text()?.trim() 
                 ?: element.selectFirst("img")?.attr("alt")?.trim() 
                 ?: "Senza Titolo"
             
@@ -67,47 +67,52 @@ class TantiFilmProvider : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val document = app.get(url, headers = commonHeaders).document
+        val response = app.get(url, headers = commonHeaders)
+        val document = response.document
         
-        val title = document.selectFirst("h1.entry-title, h1")?.text()?.trim() ?: ""
+        val title = document.selectFirst("div.data h1, h1")?.text()?.trim() ?: ""
         val poster = document.selectFirst("div.poster img")?.attr("src") 
             ?: document.selectFirst("div.image img")?.attr("src")
-        val plot = document.selectFirst("div.description, div.wp-content p, #sinopsis")?.text()
+        val plot = document.selectFirst("div.description p, #sinopsis p, div.wp-content p")?.text()
 
         val episodes = mutableListOf<Episode>()
         
-        // Riconoscimento Serie TV: verifica presenza stagioni
-        val seasons = document.select("div.seasons")
-        val isSeries = seasons.isNotEmpty()
+        // Controllo Stagioni/Episodi (Selettore specifico per TantiFilm)
+        val seasonElements = document.select("div#seasons div.seasons, div.season")
+        val isSeries = seasonElements.isNotEmpty()
 
         if (isSeries) {
-            seasons.select("div.season").forEachIndexed { sIndex, season ->
-                season.select("ul.episodios li").forEachIndexed { eIndex, ep ->
-                    val epLink = ep.selectFirst("a") ?: return@forEachIndexed
+            seasonElements.forEach { season ->
+                val sNum = season.selectFirst("span.title")?.text()?.filter { it.isDigit() }?.toIntOrNull() ?: 1
+                season.select("ul.episodios li").forEach { ep ->
+                    val epLink = ep.selectFirst("a") ?: return@forEach
                     val epHref = fixUrl(epLink.attr("href"))
-                    val epName = ep.selectFirst("div.episodiotitle a")?.text() ?: "Episodio ${eIndex + 1}"
+                    val epName = ep.selectFirst("div.episodiotitle a")?.text() ?: ep.selectFirst("a")?.text()
+                    val eNum = ep.selectFirst("div.numerando")?.text()?.substringAfter("-")?.trim()?.toIntOrNull()
                     
                     episodes.add(newEpisode(epHref) {
                         this.name = epName
-                        this.season = sIndex + 1
-                        this.episode = eIndex + 1
+                        this.season = sNum
+                        this.episode = eNum
                     })
                 }
             }
         } else {
-            // Logica Film: TantiFilm usa spesso dei tab o iframe per i player video
+            // Estrazione link Film (Spesso caricati via AJAX o nascosti in tab)
             val movieLinks = mutableListOf<String>()
             
-            // 1. Cerca link diretti nei tab (molto comune su questo tema)
-            document.select("ul.idTabs li a, div.source-box a").forEach {
-                val href = it.attr("href")
-                if (href.startsWith("http")) movieLinks.add(href)
+            // Link nei tab/player sources
+            document.select("ul#playeroptionsul li, div.source-box a").forEach {
+                val href = it.attr("data-url") ?: it.attr("href")
+                if (!href.isNullOrBlank() && href.startsWith("http")) {
+                    movieLinks.add(href)
+                }
             }
             
-            // 2. Cerca iframe (se non ci sono link diretti)
-            document.select("div.video-player iframe, div.player iframe").forEach {
+            // Iframe diretti
+            document.select("div.embed-responsive iframe, div.video-player iframe").forEach {
                 val src = it.attr("src")
-                if (src.isNotBlank()) movieLinks.add(fixUrl(src))
+                if (src.contains("http")) movieLinks.add(fixUrl(src))
             }
 
             if (movieLinks.isNotEmpty()) {
@@ -138,7 +143,6 @@ class TantiFilmProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // Supporto per link unificati separati da ###
         data.split("###").forEach { url ->
             val cleanUrl = url.trim()
             if (cleanUrl.contains("http")) {
