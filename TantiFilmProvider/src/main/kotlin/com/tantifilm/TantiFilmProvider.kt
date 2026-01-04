@@ -20,9 +20,8 @@ class TantiFilmProvider : MainAPI() {
     )
 
     override val mainPage = mainPageOf(
-        "$mainUrl/film-streaming-ita/" to "Film",
-        "$mainUrl/serie-tv-streaming/" to "Serie TV",
-        "$mainUrl/aggiornamenti-serie-tv/" to "Ultime Serie Aggiornate"
+        "$mainUrl/film/" to "Film",
+        "$mainUrl/serie-tv" to "Serie TV"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
