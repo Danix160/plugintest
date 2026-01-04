@@ -2,7 +2,9 @@ package com.onlineserietv
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
+import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.cloudstream3.network.CloudflareKiller
+import com.lagradost.cloudstream3.APIHolder.allProviders
 import org.jsoup.nodes.Document
 
 class OnlineSerieTV : MainAPI() {
@@ -18,10 +20,10 @@ class OnlineSerieTV : MainAPI() {
     // User Agent fisso per coerenza tra richieste e WebView
     private val userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0"
 
-    override val mainPage = mainPageOf(
-        mainUrl to "Ultime Serie TV",
-        "$mainUrl/movies/" to "Ultimi Film"
-    )
+    override var mainPage = mainPageOf(
+    mainUrl to "Ultime Serie TV",
+    "$mainUrl/movies/" to "Ultimi Film"
+)
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = if (page > 1) "${request.data}/page/$page/" else request.data
