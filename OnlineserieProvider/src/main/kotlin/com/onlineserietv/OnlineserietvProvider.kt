@@ -39,42 +39,42 @@ class OnlineserieProvider : MainAPI() { // Nome classe corretto qui
         return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
     }
 
-   override suspend fun search(query: String): List<SearchResponse> {
+   // Questo forza Cloudstream a usare gli headers corretti per ogni richiesta, inclusi i poster
+    override fun fixUrl(url: String): String {
+        return url
+    }
+
+    // Usiamo una mappa di headers globale per il provider
+    private val commonHeaders = mapOf(
+        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer" to mainUrl
+    )
+
+    // Modifica la tua funzione search per usare questi headers
+    override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/?s=${query.replace(" ", "+")}"
         
-        // Creiamo una mappa di headers completa per simulare un browser vero
-        val searchHeaders = mapOf(
-            "User-Agent" to userAgent,
-            "Referer" to "$mainUrl/",
-            "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-            "Accept-Language" to "it-IT,it;q=0.8,en-US;q=0.5,en;q=0.3"
-        )
-
+        // È fondamentale passare interceptor = cfKiller
         val response = app.get(
             url, 
             interceptor = cfKiller, 
-            headers = searchHeaders
+            headers = commonHeaders,
+            timeout = 60 // Cloudflare Turnstile è lento, 60s è più sicuro
         )
         
         val document = response.document
         
-        // Il selettore deve essere il più generico possibile per i risultati di WP
-        return document.select("article, .uagb-post__inner-wrap, .result-item").mapNotNull { card ->
-            val titleElement = card.selectFirst(".uagb-post__title a, h2 a, h3 a, .entry-title a") ?: return@mapNotNull null
+        // Selettore aggiornato basato sulla struttura WordPress del sito
+        return document.select("article, .uagb-post__inner-wrap").mapNotNull { card ->
+            val titleElement = card.selectFirst("h2 a, h3 a, .uagb-post__title a") ?: return@mapNotNull null
             val title = titleElement.text().trim()
             val href = titleElement.attr("href")
             
-            val img = card.selectFirst("img")
-            // Spesso il problema del 403 sui poster è risolvibile usando l'URL assoluto
-            val posterUrl = (img?.attr("data-src")?.ifEmpty { img.attr("src") }
-                ?: img?.attr("data-lazy-src"))?.let { fixUrl(it) }
+            // Estrai il poster e assicurati che sia un URL assoluto
+            val posterUrl = card.selectFirst("img")?.attr("src")?.let { fixUrl(it) }
 
-            val type = if (href.contains("/serietv/")) TvType.TvSeries else TvType.Movie
-
-            newMovieSearchResponse(title, href, type) {
+            newMovieSearchResponse(title, href, TvType.Movie) {
                 this.posterUrl = posterUrl
-                // Aggiungiamo gli headers anche al poster per evitare il 403 durante il caricamento in app
-                this.posterHeaders = searchHeaders 
             }
         }
     }
