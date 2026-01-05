@@ -12,19 +12,23 @@ class CB01Provider : MainAPI() {
     override var lang = "it"
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
 
-    // Configurazione della Home Page
+    // MANTENGO LA TUA STRUTTURA ORIGINALE
     override val mainPage = mainPageOf(
-         mainUrl to "Film",
+        mainUrl to "Film",
         "$mainUrl/serietv" to "Serie TV"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        // WordPress usa il formato /page/X/
-        val url = request.data + page
-        val document = app.get(url).document
+        // Gestione corretta della paginazione per WordPress:
+        // Se page è 1 non aggiunge nulla, altrimenti aggiunge /page/X
+        val url = if (page <= 1) {
+            request.data
+        } else {
+            "${request.data.removeSuffix("/")}/page/$page/"
+        }
         
-        // Selettore basato sulla classe .card tipica del tema Sequex/CB01
-        val home = document.select("div.card, div.post-item").mapNotNull {
+        val document = app.get(url).document
+        val home = document.select("div.card, div.post-item, article").mapNotNull {
             it.toSearchResult()
         }
         return newHomePageResponse(request.name, home)
@@ -34,19 +38,19 @@ class CB01Provider : MainAPI() {
         val url = "$mainUrl/?s=$query"
         val document = app.get(url).document
 
-        return document.select("div.card, div.post-item").mapNotNull {
+        return document.select("div.card, div.post-item, article").mapNotNull {
             it.toSearchResult()
         }
     }
 
-    // Funzione di utilità per estrarre i dati dalla card
     private fun Element.toSearchResult(): SearchResponse? {
-        val title = this.selectFirst(".card-title a, h2 a")?.text()?.trim() ?: return null
+        val title = this.selectFirst(".card-title a, h2 a, .post-title a")?.text()?.trim() ?: return null
         val href = this.selectFirst("a")?.attr("href") ?: return null
-        val posterUrl = this.selectFirst("img")?.attr("data-src") 
-            ?: this.selectFirst("img")?.attr("src")
+        val posterUrl = this.selectFirst("img")?.let { 
+            it.attr("data-src").ifEmpty { it.attr("src") } 
+        }
 
-        return if (title.contains("Serie TV", ignoreCase = true)) {
+        return if (href.contains("/serietv/") || title.contains("Serie TV", true)) {
             newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
                 this.posterUrl = posterUrl
             }
@@ -59,18 +63,24 @@ class CB01Provider : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse {
         val document = app.get(url).document
-        val title = document.selectFirst("h1.entry-title")?.text()?.trim() ?: ""
-        val poster = document.selectFirst(".poster img")?.attr("src")
-        val plot = document.selectFirst(".entry-content p")?.text()
+        val title = document.selectFirst("h1.entry-title, h1.card-title")?.text()?.trim() ?: ""
+        val poster = document.selectFirst(".card-image img, .poster img")?.let {
+            it.attr("src").ifEmpty { it.attr("data-src") }
+        }
+        val plot = document.selectFirst(".entry-content p, .card-text")?.text()
         
-        // Verifica se è una serie TV o un film
         val isTvSeries = url.contains("/serietv/") || document.selectFirst("ul.episodi") != null
 
         return if (isTvSeries) {
-            // Logica per Serie TV (estrazione stagioni/episodi)
-            val episodes = document.select("ul.episodi li").map { 
-                // Qui andrebbe la logica per mappare gli episodi
-                Episode(it.select("a").attr("href"), it.text())
+            // CORREZIONE DEFINITIVA ERRORE COMPILAZIONE
+            val episodes = document.select("ul.episodi li").mapNotNull {
+                val link = it.select("a").attr("href")
+                val name = it.text().trim()
+                if (link.isNullOrBlank()) return@mapNotNull null
+                
+                newEpisode(link) {
+                    this.name = name
+                }
             }
             newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
                 this.posterUrl = poster
@@ -91,11 +101,9 @@ class CB01Provider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val document = app.get(data).document
-        
-        // CB01 mette i link in iframe o bottoni dopo la descrizione
-        document.select("iframe, a.btn-download").forEach {
+        document.select("iframe, a.btn-download, .sp-body a").forEach {
             val link = it.attr("src").ifEmpty { it.attr("href") }
-            if (link.contains("http")) {
+            if (link.contains("http") && !link.contains("google")) {
                 loadExtractor(link, data, subtitleCallback, callback)
             }
         }
