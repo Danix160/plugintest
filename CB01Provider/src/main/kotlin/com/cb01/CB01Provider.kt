@@ -31,31 +31,26 @@ class CB01Provider : MainAPI() {
         return newHomePageResponse(request.name, home)
     }
 
-    // RICERCA UNIFICATA: Mostra Film e Serie TV insieme
+    // RICERCA UNIFICATA: Film + Serie TV insieme
     override suspend fun search(query: String): List<SearchResponse> {
         val allResults = mutableListOf<SearchResponse>()
         
-        // 1. Cerca nei Film
+        // 1. Cerca Film
         try {
             val filmResponse = app.get("$mainUrl/?s=$query").document
-            filmResponse.select("div.card, div.post-item, article").forEach {
+            filmResponse.select("div.card, div.post-item, article.card").forEach {
                 it.toSearchResult()?.let { result -> allResults.add(result) }
             }
-        } catch (e: Exception) { 
-            // Log errore opzionale
-        }
+        } catch (e: Exception) { }
 
-        // 2. Cerca nelle Serie TV
+        // 2. Cerca Serie TV
         try {
             val tvResponse = app.get("$mainUrl/serietv/?s=$query").document
-            tvResponse.select("div.card, div.post-item, article").forEach {
+            tvResponse.select("div.card, div.post-item, article.card").forEach {
                 it.toSearchResult()?.let { result -> allResults.add(result) }
             }
-        } catch (e: Exception) {
-            // Log errore opzionale
-        }
+        } catch (e: Exception) { }
 
-        // Ritorna la lista completa (Film + Serie)
         return allResults
     }
 
@@ -63,9 +58,10 @@ class CB01Provider : MainAPI() {
         val title = this.selectFirst(".card-title a, h2 a, .post-title a")?.text()?.trim() ?: return null
         val href = this.selectFirst("a")?.attr("href") ?: return null
         
-        // Supporto per il Lazy Load delle immagini (data-src)
+        // Gestione Lazy Load (data-lazyloaded)
         val img = this.selectFirst("img")
-        val posterUrl = img?.attr("data-src")?.takeIf { it.isNotEmpty() } ?: img?.attr("src")
+        val posterUrl = img?.attr("data-src")?.takeIf { it.isNotEmpty() } 
+            ?: img?.attr("src")
 
         return if (href.contains("/serietv/") || title.contains("Serie TV", true)) {
             newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
@@ -81,24 +77,31 @@ class CB01Provider : MainAPI() {
     override suspend fun load(url: String): LoadResponse {
         val document = app.get(url).document
         val title = document.selectFirst("h1.entry-title, h1.card-title")?.text()?.trim() ?: ""
-        val posterElement = document.selectFirst(".card-image img, .poster img")
+        
+        val posterElement = document.selectFirst(".card-image img, .poster img, .entry-content img")
         val poster = posterElement?.attr("src")?.takeIf { it.isNotEmpty() } ?: posterElement?.attr("data-src")
         
         val plot = document.selectFirst(".entry-content p, .card-text")?.text()
         
-        val isTvSeries = url.contains("/serietv/") || document.selectFirst("ul.episodi") != null
+        val isTvSeries = url.contains("/serietv/") || document.selectFirst("ul.episodi, .entry-content") != null
 
         return if (isTvSeries) {
-            // CORREZIONE: Usa newEpisode invece del vecchio costruttore
-            val episodes = document.select("ul.episodi li").mapNotNull {
-                val link = it.select("a").attr("href")
+            val episodes = mutableListOf<Episode>()
+            
+            // Selettore specifico per gli episodi nelle serie (basato sul file HTML Scooby-Doo)
+            // Cerca i link che contengono numeri di stagione/episodio nel testo
+            document.select(".entry-content a, ul.episodi li a").forEach {
+                val epHref = it.attr("href")
                 val epName = it.text().trim()
-                if (link.isNullOrBlank()) return@mapNotNull null
                 
-                newEpisode(link) {
-                    this.name = epName
+                // Filtriamo i link che non sono episodi (es. tag o categorie)
+                if (epHref.contains("http") && (epName.contains(Regex("\\d+x\\d+|Episodio|Stagione", RegexOption.IGNORE_CASE)))) {
+                    episodes.add(newEpisode(epHref) {
+                        this.name = epName
+                    })
                 }
             }
+            
             newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
                 this.posterUrl = poster
                 this.plot = plot
@@ -119,10 +122,10 @@ class CB01Provider : MainAPI() {
     ): Boolean {
         val document = app.get(data).document
         
-        // Cerca i link nei player (iframe) e nei bottoni download/spoiler
-        document.select("iframe, a.btn-download, .sp-body a").forEach {
+        // Estrae link da iframe, pulsanti download e aree spoiler
+        document.select("iframe, a.btn-download, .sp-body a, .entry-content iframe").forEach {
             val link = it.attr("src").ifEmpty { it.attr("href") }
-            if (link.contains("http") && !link.contains("google")) {
+            if (link.contains("http") && !link.contains("google") && !link.contains("facebook")) {
                 loadExtractor(link, data, subtitleCallback, callback)
             }
         }
