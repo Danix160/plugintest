@@ -31,36 +31,41 @@ class CB01Provider : MainAPI() {
         return newHomePageResponse(request.name, home)
     }
 
-    // Ricerca semplificata senza kotlinx.coroutines per evitare errori di compilazione
+    // RICERCA UNIFICATA: Mostra Film e Serie TV insieme
     override suspend fun search(query: String): List<SearchResponse> {
-        val resultList = mutableListOf<SearchResponse>()
+        val allResults = mutableListOf<SearchResponse>()
         
-        // Ricerca Film
+        // 1. Cerca nei Film
         try {
-            val filmDoc = app.get("$mainUrl/?s=$query").document
-            filmDoc.select("div.card, div.post-item, article").forEach {
-                it.toSearchResult()?.let { res -> resultList.add(res) }
+            val filmResponse = app.get("$mainUrl/?s=$query").document
+            filmResponse.select("div.card, div.post-item, article").forEach {
+                it.toSearchResult()?.let { result -> allResults.add(result) }
             }
-        } catch (e: Exception) { /* ignora errori */ }
+        } catch (e: Exception) { 
+            // Log errore opzionale
+        }
 
-        // Ricerca Serie TV
+        // 2. Cerca nelle Serie TV
         try {
-            val tvDoc = app.get("$mainUrl/serietv/?s=$query").document
-            tvDoc.select("div.card, div.post-item, article").forEach {
-                it.toSearchResult()?.let { res -> resultList.add(res) }
+            val tvResponse = app.get("$mainUrl/serietv/?s=$query").document
+            tvResponse.select("div.card, div.post-item, article").forEach {
+                it.toSearchResult()?.let { result -> allResults.add(result) }
             }
-        } catch (e: Exception) { /* ignora errori */ }
+        } catch (e: Exception) {
+            // Log errore opzionale
+        }
 
-        return resultList
+        // Ritorna la lista completa (Film + Serie)
+        return allResults
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
         val title = this.selectFirst(".card-title a, h2 a, .post-title a")?.text()?.trim() ?: return null
         val href = this.selectFirst("a")?.attr("href") ?: return null
-        val posterUrl = this.selectFirst("img")?.let { 
-            val dataSrc = it.attr("data-src")
-            if (dataSrc.isNotEmpty()) dataSrc else it.attr("src")
-        }
+        
+        // Supporto per il Lazy Load delle immagini (data-src)
+        val img = this.selectFirst("img")
+        val posterUrl = img?.attr("data-src")?.takeIf { it.isNotEmpty() } ?: img?.attr("src")
 
         return if (href.contains("/serietv/") || title.contains("Serie TV", true)) {
             newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
@@ -76,14 +81,15 @@ class CB01Provider : MainAPI() {
     override suspend fun load(url: String): LoadResponse {
         val document = app.get(url).document
         val title = document.selectFirst("h1.entry-title, h1.card-title")?.text()?.trim() ?: ""
-        val poster = document.selectFirst(".card-image img, .poster img")?.let {
-            it.attr("src").ifEmpty { it.attr("data-src") }
-        }
+        val posterElement = document.selectFirst(".card-image img, .poster img")
+        val poster = posterElement?.attr("src")?.takeIf { it.isNotEmpty() } ?: posterElement?.attr("data-src")
+        
         val plot = document.selectFirst(".entry-content p, .card-text")?.text()
         
         val isTvSeries = url.contains("/serietv/") || document.selectFirst("ul.episodi") != null
 
         return if (isTvSeries) {
+            // CORREZIONE: Usa newEpisode invece del vecchio costruttore
             val episodes = document.select("ul.episodi li").mapNotNull {
                 val link = it.select("a").attr("href")
                 val epName = it.text().trim()
@@ -112,6 +118,8 @@ class CB01Provider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val document = app.get(data).document
+        
+        // Cerca i link nei player (iframe) e nei bottoni download/spoiler
         document.select("iframe, a.btn-download, .sp-body a").forEach {
             val link = it.attr("src").ifEmpty { it.attr("href") }
             if (link.contains("http") && !link.contains("google")) {
