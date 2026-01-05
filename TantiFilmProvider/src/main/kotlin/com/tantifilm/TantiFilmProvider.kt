@@ -19,27 +19,28 @@ class TantiFilmProvider : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = if (page <= 1) request.data else "${request.data}page/$page/"
-        val document = app.get(url).document
+        val res = app.get(url)
+        val document = res.document
         
         val items = document.select("div.movie-item").mapNotNull { element ->
             val a = element.selectFirst("a") ?: return@mapNotNull null
-            val href = a.attr("href") ?: "" // Protezione nullo
-            if (href.isBlank()) return@mapNotNull null
+            val href = a.attr("href") ?: return@mapNotNull null // Se l'URL è nullo, salta
             
             val title = element.selectFirst(".m-title")?.text()?.trim() 
                 ?: a.attr("title") 
-                ?: "Senza Titolo"
+                ?: "Film"
                 
             val poster = element.selectFirst("img")?.attr("src") ?: ""
             val quality = element.selectFirst(".m-quality")?.text()
 
             newMovieSearchResponse(title, fixUrl(href), TvType.Movie) {
-                this.posterUrl = if (poster.isNotBlank()) fixUrl(poster) else null
+                if (poster.isNotBlank()) {
+                    this.posterUrl = fixUrl(poster)
+                }
                 addQuality(quality)
             }
         }
         
-        Log.d("TantiFilm", "Elementi trovati: ${items.size}")
         return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
     }
 
@@ -49,14 +50,14 @@ class TantiFilmProvider : MainAPI() {
         
         return document.select("div.movie-item").mapNotNull { element ->
             val a = element.selectFirst("a") ?: return@mapNotNull null
-            val href = a.attr("href") ?: ""
-            if (href.isBlank()) return@mapNotNull null
-            
+            val href = a.attr("href") ?: return@mapNotNull null
             val title = element.selectFirst(".m-title")?.text() ?: a.text()
             val poster = element.selectFirst("img")?.attr("src") ?: ""
             
             newMovieSearchResponse(title, fixUrl(href), TvType.Movie) {
-                this.posterUrl = if (poster.isNotBlank()) fixUrl(poster) else null
+                if (poster.isNotBlank()) {
+                    this.posterUrl = fixUrl(poster)
+                }
             }
         }
     }
@@ -88,12 +89,12 @@ class TantiFilmProvider : MainAPI() {
 
         return if (isSeries) {
             newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
-                this.posterUrl = if (poster.isNotBlank()) fixUrl(poster) else null
+                if (poster.isNotBlank()) this.posterUrl = fixUrl(poster)
                 this.plot = plot
             }
         } else {
             newMovieLoadResponse(title, url, TvType.Movie, episodes.firstOrNull()?.data ?: "") {
-                this.posterUrl = if (poster.isNotBlank()) fixUrl(poster) else null
+                if (poster.isNotBlank()) this.posterUrl = fixUrl(poster)
                 this.plot = plot
             }
         }
