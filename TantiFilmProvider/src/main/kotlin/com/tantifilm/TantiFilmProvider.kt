@@ -23,12 +23,17 @@ class TantiFilmProvider : MainAPI() {
         
         val items = document.select("div.movie-item").mapNotNull { element ->
             val a = element.selectFirst("a") ?: return@mapNotNull null
-            val href = fixUrl(a.attr("href"))
-            val title = element.selectFirst(".m-title")?.text()?.trim() ?: a.attr("title") ?: "Senza Titolo"
+            val href = a.attr("href") ?: "" // Protezione nullo
+            if (href.isBlank()) return@mapNotNull null
+            
+            val title = element.selectFirst(".m-title")?.text()?.trim() 
+                ?: a.attr("title") 
+                ?: "Senza Titolo"
+                
             val poster = element.selectFirst("img")?.attr("src") ?: ""
             val quality = element.selectFirst(".m-quality")?.text()
 
-            newMovieSearchResponse(title, href, TvType.Movie) {
+            newMovieSearchResponse(title, fixUrl(href), TvType.Movie) {
                 this.posterUrl = if (poster.isNotBlank()) fixUrl(poster) else null
                 addQuality(quality)
             }
@@ -44,10 +49,13 @@ class TantiFilmProvider : MainAPI() {
         
         return document.select("div.movie-item").mapNotNull { element ->
             val a = element.selectFirst("a") ?: return@mapNotNull null
+            val href = a.attr("href") ?: ""
+            if (href.isBlank()) return@mapNotNull null
+            
             val title = element.selectFirst(".m-title")?.text() ?: a.text()
             val poster = element.selectFirst("img")?.attr("src") ?: ""
             
-            newMovieSearchResponse(title, fixUrl(a.attr("href")), TvType.Movie) {
+            newMovieSearchResponse(title, fixUrl(href), TvType.Movie) {
                 this.posterUrl = if (poster.isNotBlank()) fixUrl(poster) else null
             }
         }
@@ -64,9 +72,12 @@ class TantiFilmProvider : MainAPI() {
 
         if (isSeries) {
             document.select(".s-eps a").forEach { ep ->
-                episodes.add(newEpisode(fixUrl(ep.attr("href"))) {
-                    this.name = ep.text().trim()
-                })
+                val epHref = ep.attr("href") ?: ""
+                if (epHref.isNotBlank()) {
+                    episodes.add(newEpisode(fixUrl(epHref)) {
+                        this.name = ep.text().trim()
+                    })
+                }
             }
         } else {
             val playerUrl = document.selectFirst("iframe")?.attr("src")
