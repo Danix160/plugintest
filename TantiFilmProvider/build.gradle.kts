@@ -6,7 +6,7 @@ cloudstream {
     description = "Film e Serie TV"
     authors = listOf("Danix")
     
-    status = 1
+    status = 0
     tvTypes = listOf("Movie", "TvSeries")
     requiresResources = false
     language = "it"
