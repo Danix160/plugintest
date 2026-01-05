@@ -3,7 +3,7 @@
         "iconUrl": "https://cb01.uno/apple-icon-180x180px.png",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/Danix160/plugintest",
-        "fileSize": 12853,
+        "fileSize": 13086,
         "status": 1,
         "language": "it",
         "authors": [
@@ -13,7 +13,7 @@
             "Movie",
             "TvSeries"
         ],
-        "version": 4,
+        "version": 5,
         "internalName": "CB01Provider",
         "description": "CineBlog01",
         "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/CB01Provider.cs3",
