@@ -12,12 +12,13 @@ class TantiFilmProvider : MainAPI() {
     override var lang = "it"
     override val hasQuickSearch = true
 
-    // RIMOSSO 'override' perché causa l'errore di compilazione
-    val myHeaders = mapOf(
-        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    // Headers personalizzati per evitare errori di ereditarietà (niente 'override')
+    val pluginHeaders = mapOf(
+        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
         "Referer" to "$mainUrl/"
     )
 
+    // MainPage aggiornata: rimosso "Prime Visioni" come richiesto
     override val mainPage = mainPageOf(
         "$mainUrl/film/" to "Film HD",
         "$mainUrl/serie-tv/" to "Serie TV"
@@ -25,7 +26,7 @@ class TantiFilmProvider : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = if (page <= 1) request.data else "${request.data}page/$page/"
-        val document = app.get(url, headers = myHeaders).document
+        val document = app.get(url, headers = pluginHeaders).document
         val home = document.select("div.mov").mapNotNull {
             it.toSearchResult()
         }
@@ -34,7 +35,7 @@ class TantiFilmProvider : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/index.php?do=search&subaction=search&story=$query"
-        val document = app.get(url, headers = myHeaders).document
+        val document = app.get(url, headers = pluginHeaders).document
 
         return document.select("div.mov").mapNotNull {
             it.toSearchResult()
@@ -42,17 +43,20 @@ class TantiFilmProvider : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val document = app.get(url, headers = myHeaders).document
+        val document = app.get(url, headers = pluginHeaders).document
 
-        val title = document.selectFirst("h1")?.text()?.trim() ?: ""
+        val title = document.selectFirst("h1")?.text()?.trim() ?: "Nessun Titolo"
         val poster = document.selectFirst("div.short-img img")?.attr("abs:src")
         val description = document.selectFirst("div.full-text")?.text()?.trim()
         
         val isSerie = url.contains("/serie-tv")
 
         return if (isSerie) {
-            // CORREZIONE 2: Uso corretto di newTvSeriesLoadResponse
-            newTvSeriesLoadResponse(title, url, TvType.TvSeries, url) {
+            // Fix per l'errore di compilazione: passiamo una lista di oggetti Episode
+            val episodes = listOf(
+                Episode(url, "Guarda Episodio")
+            )
+            newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
                 this.posterUrl = poster
                 this.plot = description
             }
@@ -70,8 +74,9 @@ class TantiFilmProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val document = app.get(data, headers = myHeaders).document
+        val document = app.get(data, headers = pluginHeaders).document
         
+        // Estrazione link dai vari player (iframe)
         document.select("iframe").forEach { iframe ->
             val source = iframe.attr("abs:src")
             if (source.isNotEmpty() && !source.contains("google") && !source.contains("facebook")) {
