@@ -2,7 +2,7 @@ cloudstream {
     extra["prefix"] = "TantiFilm"
     extra["displayName"] = "TantiFilm"
     
-    version = 30
+    version = 31
     description = "Film e Serie TV"
     authors = listOf("Danix")
     
