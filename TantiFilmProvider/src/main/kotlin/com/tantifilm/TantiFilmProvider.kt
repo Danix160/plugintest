@@ -21,16 +21,15 @@ class TantiFilmProvider : MainAPI() {
         val url = if (page <= 1) request.data else "${request.data}page/$page/"
         val document = app.get(url).document
         
-        // Selettore specifico per il template DataLife Engine di TantiFilm
         val items = document.select("div.movie-item").mapNotNull { element ->
             val a = element.selectFirst("a") ?: return@mapNotNull null
             val href = fixUrl(a.attr("href"))
-            val title = element.selectFirst(".m-title")?.text()?.trim() ?: a.attr("title")
-            val poster = element.selectFirst("img")?.attr("src")
+            val title = element.selectFirst(".m-title")?.text()?.trim() ?: a.attr("title") ?: "Senza Titolo"
+            val poster = element.selectFirst("img")?.attr("src") ?: ""
             val quality = element.selectFirst(".m-quality")?.text()
 
             newMovieSearchResponse(title, href, TvType.Movie) {
-                this.posterUrl = fixUrl(poster ?: "")
+                this.posterUrl = if (poster.isNotBlank()) fixUrl(poster) else null
                 addQuality(quality)
             }
         }
@@ -46,31 +45,30 @@ class TantiFilmProvider : MainAPI() {
         return document.select("div.movie-item").mapNotNull { element ->
             val a = element.selectFirst("a") ?: return@mapNotNull null
             val title = element.selectFirst(".m-title")?.text() ?: a.text()
+            val poster = element.selectFirst("img")?.attr("src") ?: ""
             
             newMovieSearchResponse(title, fixUrl(a.attr("href")), TvType.Movie) {
-                this.posterUrl = fixUrl(element.selectFirst("img")?.attr("src") ?: "")
+                this.posterUrl = if (poster.isNotBlank()) fixUrl(poster) else null
             }
         }
     }
 
     override suspend fun load(url: String): LoadResponse {
         val document = app.get(url).document
-        val title = document.selectFirst("h1")?.text()?.trim() ?: ""
-        val poster = document.selectFirst(".m-img img")?.attr("src")
+        val title = document.selectFirst("h1")?.text()?.trim() ?: "Senza Titolo"
+        val poster = document.selectFirst(".m-img img")?.attr("src") ?: ""
         val plot = document.selectFirst(".m-desc")?.text()
         
         val isSeries = url.contains("/serie-tv/")
         val episodes = mutableListOf<Episode>()
 
         if (isSeries) {
-            // Estrazione episodi per serie TV
             document.select(".s-eps a").forEach { ep ->
                 episodes.add(newEpisode(fixUrl(ep.attr("href"))) {
                     this.name = ep.text().trim()
                 })
             }
         } else {
-            // Per i film cerchiamo il player nell'area dedicata
             val playerUrl = document.selectFirst("iframe")?.attr("src")
             if (playerUrl != null) {
                 episodes.add(newEpisode(playerUrl) { this.name = "Film" })
@@ -79,12 +77,12 @@ class TantiFilmProvider : MainAPI() {
 
         return if (isSeries) {
             newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
-                this.posterUrl = fixUrl(poster ?: "")
+                this.posterUrl = if (poster.isNotBlank()) fixUrl(poster) else null
                 this.plot = plot
             }
         } else {
             newMovieLoadResponse(title, url, TvType.Movie, episodes.firstOrNull()?.data ?: "") {
-                this.posterUrl = fixUrl(poster ?: "")
+                this.posterUrl = if (poster.isNotBlank()) fixUrl(poster) else null
                 this.plot = plot
             }
         }
