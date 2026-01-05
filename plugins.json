@@ -1,5 +1,24 @@
 [
     {
+        "iconUrl": "https://cb01.uno/apple-icon-180x180px.png",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/Danix160/plugintest",
+        "status": 1,
+        "language": "it",
+        "authors": [
+            "Danix"
+        ],
+        "tvTypes": [
+            "Movie",
+            "TvSeries"
+        ],
+        "version": 1,
+        "internalName": "CB01Provider",
+        "description": "CineBlog01",
+        "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/CB01Provider.cs3",
+        "name": "CB01Provider"
+    },
+    {
         "iconUrl": "https://onlineserietv.com/images/logo.svg",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/Danix160/plugintest",
