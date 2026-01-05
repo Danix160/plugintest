@@ -1,10 +1,9 @@
 package com.tantifilm
 
+import android.util.Log // Importante per i log
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
-import com.lagradost.cloudstream3.MainAPI
-import com.lagradost.cloudstream3.TvType
 
 class TantiFilmProvider : MainAPI() {
     override var mainUrl = "https://tanti-film.stream"
@@ -22,19 +21,25 @@ class TantiFilmProvider : MainAPI() {
         val url = if (page <= 1) request.data else "${request.data}page/$page/"
         val document = app.get(url).document
         
-        // Selettore d'emergenza: prende tutti gli articoli
+        // --- LOG DI DEBUG ---
+        Log.d("TantiFilm", "HTML Length = ${document.html().length}")
+        Log.d("TantiFilm", "Articles Found = ${document.select("article").size}")
+        // --------------------
+
         val items = document.select("article").mapNotNull { element ->
             try {
                 val a = element.selectFirst("a") ?: return@mapNotNull null
                 val href = fixUrl(a.attr("href"))
-                if (href.endsWith("/film/") || href.endsWith("/serie-tv/")) return@mapNotNull null
+                
+                // Salta i link che non sono film (es. categorie)
+                if (href.removeSuffix("/").endsWith("/film") || href.removeSuffix("/").endsWith("/serie-tv")) return@mapNotNull null
 
-                val title = element.selectFirst("h3, h2")?.text()?.trim() 
+                val title = element.selectFirst("h3, h2, .title")?.text()?.trim() 
                     ?: a.attr("title") 
                     ?: "Video"
 
-                val posterUrl = element.selectFirst("img")?.let { 
-                    it.attr("data-src").ifBlank { it.attr("src") } 
+                val posterUrl = element.selectFirst("img")?.let { img ->
+                    img.attr("data-src").ifBlank { img.attr("src") }
                 }
 
                 newMovieSearchResponse(title, href, TvType.Movie) {
@@ -50,8 +55,10 @@ class TantiFilmProvider : MainAPI() {
         val document = app.get(url).document
         return document.select("div.result-item, article").mapNotNull { element ->
             val a = element.selectFirst("a") ?: return@mapNotNull null
-            newMovieSearchResponse(a.text(), fixUrl(a.attr("href")), TvType.Movie) {
-                this.posterUrl = element.selectFirst("img")?.attr("src")
+            val title = element.selectFirst(".title a, h3")?.text() ?: a.text()
+            
+            newMovieSearchResponse(title, fixUrl(a.attr("href")), TvType.Movie) {
+                this.posterUrl = element.selectFirst("img")?.let { it.attr("src") }
             }
         }
     }
@@ -70,7 +77,10 @@ class TantiFilmProvider : MainAPI() {
                 })
             }
         } else {
-            val link = document.selectFirst("ul#playeroptionsul li")?.attr("data-url")
+            // Cerca il link del player
+            val link = document.selectFirst("iframe")?.attr("src") 
+                ?: document.selectFirst("ul#playeroptionsul li")?.attr("data-url")
+            
             if (link != null) episodes.add(newEpisode(link) { this.name = "Film" })
         }
 
@@ -82,7 +92,9 @@ class TantiFilmProvider : MainAPI() {
     }
 
     override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
-        loadExtractor(data, subtitleCallback, callback)
+        if (data.startsWith("http")) {
+            loadExtractor(data, subtitleCallback, callback)
+        }
         return true
     }
 }
