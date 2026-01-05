@@ -1,6 +1,5 @@
 package com.tantifilm
 
-import android.util.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
@@ -19,22 +18,23 @@ class TantiFilmProvider : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = if (page <= 1) request.data else "${request.data}page/$page/"
-        val res = app.get(url)
-        val document = res.document
+        val document = app.get(url).document
         
         val items = document.select("div.movie-item").mapNotNull { element ->
             val a = element.selectFirst("a") ?: return@mapNotNull null
-            val href = a.attr("href") ?: return@mapNotNull null // Se l'URL è nullo, salta
+            val href = a.attr("href")
+            if (href.isNullOrBlank()) return@mapNotNull null
             
             val title = element.selectFirst(".m-title")?.text()?.trim() 
-                ?: a.attr("title") 
+                ?: a.attr("title")?.trim() 
                 ?: "Film"
                 
-            val poster = element.selectFirst("img")?.attr("src") ?: ""
+            val poster = element.selectFirst("img")?.attr("src")
             val quality = element.selectFirst(".m-quality")?.text()
 
+            // Usiamo fixUrl(href!!) solo dopo aver verificato che non è null o blank
             newMovieSearchResponse(title, fixUrl(href), TvType.Movie) {
-                if (poster.isNotBlank()) {
+                if (!poster.isNullOrBlank()) {
                     this.posterUrl = fixUrl(poster)
                 }
                 addQuality(quality)
@@ -50,12 +50,14 @@ class TantiFilmProvider : MainAPI() {
         
         return document.select("div.movie-item").mapNotNull { element ->
             val a = element.selectFirst("a") ?: return@mapNotNull null
-            val href = a.attr("href") ?: return@mapNotNull null
-            val title = element.selectFirst(".m-title")?.text() ?: a.text()
-            val poster = element.selectFirst("img")?.attr("src") ?: ""
+            val href = a.attr("href")
+            if (href.isNullOrBlank()) return@mapNotNull null
+            
+            val title = (element.selectFirst(".m-title")?.text() ?: a.text()).trim()
+            val poster = element.selectFirst("img")?.attr("src")
             
             newMovieSearchResponse(title, fixUrl(href), TvType.Movie) {
-                if (poster.isNotBlank()) {
+                if (!poster.isNullOrBlank()) {
                     this.posterUrl = fixUrl(poster)
                 }
             }
@@ -65,16 +67,16 @@ class TantiFilmProvider : MainAPI() {
     override suspend fun load(url: String): LoadResponse {
         val document = app.get(url).document
         val title = document.selectFirst("h1")?.text()?.trim() ?: "Senza Titolo"
-        val poster = document.selectFirst(".m-img img")?.attr("src") ?: ""
-        val plot = document.selectFirst(".m-desc")?.text()
+        val poster = document.selectFirst(".m-img img")?.attr("src")
+        val plot = document.selectFirst(".m-desc")?.text()?.trim()
         
         val isSeries = url.contains("/serie-tv/")
         val episodes = mutableListOf<Episode>()
 
         if (isSeries) {
             document.select(".s-eps a").forEach { ep ->
-                val epHref = ep.attr("href") ?: ""
-                if (epHref.isNotBlank()) {
+                val epHref = ep.attr("href")
+                if (!epHref.isNullOrBlank()) {
                     episodes.add(newEpisode(fixUrl(epHref)) {
                         this.name = ep.text().trim()
                     })
@@ -82,19 +84,20 @@ class TantiFilmProvider : MainAPI() {
             }
         } else {
             val playerUrl = document.selectFirst("iframe")?.attr("src")
-            if (playerUrl != null) {
+            if (!playerUrl.isNullOrBlank()) {
                 episodes.add(newEpisode(playerUrl) { this.name = "Film" })
             }
         }
 
         return if (isSeries) {
             newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
-                if (poster.isNotBlank()) this.posterUrl = fixUrl(poster)
+                if (!poster.isNullOrBlank()) this.posterUrl = fixUrl(poster)
                 this.plot = plot
             }
         } else {
-            newMovieLoadResponse(title, url, TvType.Movie, episodes.firstOrNull()?.data ?: "") {
-                if (poster.isNotBlank()) this.posterUrl = fixUrl(poster)
+            val data = episodes.firstOrNull()?.data ?: ""
+            newMovieLoadResponse(title, url, TvType.Movie, data) {
+                if (!poster.isNullOrBlank()) this.posterUrl = fixUrl(poster)
                 this.plot = plot
             }
         }
