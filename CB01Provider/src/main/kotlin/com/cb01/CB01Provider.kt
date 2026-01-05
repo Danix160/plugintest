@@ -18,87 +18,76 @@ class CB01Provider : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val url = if (page <= 1) {
-            request.data
-        } else {
-            "${request.data.removeSuffix("/")}/page/$page/"
-        }
-        
+        val url = if (page <= 1) request.data else "${request.data.removeSuffix("/")}/page/$page/"
         val document = app.get(url).document
-        val home = document.select("div.card, div.post-item, article").mapNotNull {
-            it.toSearchResult()
-        }
+        val home = document.select("div.card, div.post-item, article").mapNotNull { it.toSearchResult() }
         return newHomePageResponse(request.name, home)
     }
 
-    // RICERCA UNIFICATA: Film + Serie TV insieme
     override suspend fun search(query: String): List<SearchResponse> {
         val allResults = mutableListOf<SearchResponse>()
+        val searchPaths = listOf("$mainUrl/?s=", "$mainUrl/serietv/?s=")
         
-        // 1. Cerca Film
-        try {
-            val filmResponse = app.get("$mainUrl/?s=$query").document
-            filmResponse.select("div.card, div.post-item, article.card").forEach {
-                it.toSearchResult()?.let { result -> allResults.add(result) }
-            }
-        } catch (e: Exception) { }
-
-        // 2. Cerca Serie TV
-        try {
-            val tvResponse = app.get("$mainUrl/serietv/?s=$query").document
-            tvResponse.select("div.card, div.post-item, article.card").forEach {
-                it.toSearchResult()?.let { result -> allResults.add(result) }
-            }
-        } catch (e: Exception) { }
-
+        searchPaths.forEach { path ->
+            try {
+                val doc = app.get(path + query).document
+                doc.select("div.card, div.post-item, article.card").forEach {
+                    it.toSearchResult()?.let { result -> allResults.add(result) }
+                }
+            } catch (e: Exception) { }
+        }
         return allResults
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
         val title = this.selectFirst(".card-title a, h2 a, .post-title a")?.text()?.trim() ?: return null
         val href = this.selectFirst("a")?.attr("href") ?: return null
-        
-        // Gestione Lazy Load (data-lazyloaded)
         val img = this.selectFirst("img")
-        val posterUrl = img?.attr("data-src")?.takeIf { it.isNotEmpty() } 
-            ?: img?.attr("src")
+        val posterUrl = img?.attr("data-src")?.takeIf { it.isNotEmpty() } ?: img?.attr("src")
 
         return if (href.contains("/serietv/") || title.contains("Serie TV", true)) {
-            newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
-                this.posterUrl = posterUrl
-            }
+            newTvSeriesSearchResponse(title, href, TvType.TvSeries) { this.posterUrl = posterUrl }
         } else {
-            newMovieSearchResponse(title, href, TvType.Movie) {
-                this.posterUrl = posterUrl
-            }
+            newMovieSearchResponse(title, href, TvType.Movie) { this.posterUrl = posterUrl }
         }
     }
 
     override suspend fun load(url: String): LoadResponse {
         val document = app.get(url).document
         val title = document.selectFirst("h1.entry-title, h1.card-title")?.text()?.trim() ?: ""
-        
-        val posterElement = document.selectFirst(".card-image img, .poster img, .entry-content img")
-        val poster = posterElement?.attr("src")?.takeIf { it.isNotEmpty() } ?: posterElement?.attr("data-src")
-        
+        val poster = document.selectFirst(".card-image img, .poster img, .entry-content img")?.let {
+            it.attr("src").ifEmpty { it.attr("data-src") }
+        }
         val plot = document.selectFirst(".entry-content p, .card-text")?.text()
         
-        val isTvSeries = url.contains("/serietv/") || document.selectFirst("ul.episodi, .entry-content") != null
+        val isTvSeries = url.contains("/serietv/") || document.selectFirst(".sp-wrap, ul.episodi") != null
 
         return if (isTvSeries) {
             val episodes = mutableListOf<Episode>()
             
-            // Selettore specifico per gli episodi nelle serie (basato sul file HTML Scooby-Doo)
-            // Cerca i link che contengono numeri di stagione/episodio nel testo
-            document.select(".entry-content a, ul.episodi li a").forEach {
-                val epHref = it.attr("href")
-                val epName = it.text().trim()
-                
-                // Filtriamo i link che non sono episodi (es. tag o categorie)
-                if (epHref.contains("http") && (epName.contains(Regex("\\d+x\\d+|Episodio|Stagione", RegexOption.IGNORE_CASE)))) {
-                    episodes.add(newEpisode(epHref) {
-                        this.name = epName
-                    })
+            // 1. GESTIONE SPOILER (sp-wrap) - Come nel tuo esempio
+            document.select("div.sp-wrap").forEach { wrap ->
+                val seasonName = wrap.selectFirst(".sp-head")?.text()?.trim() ?: "Serie"
+                wrap.select(".sp-body a").forEach { a ->
+                    val epHref = a.attr("href")
+                    val hostName = a.text().trim()
+                    if (epHref.startsWith("http")) {
+                        episodes.add(newEpisode(epHref) {
+                            this.name = "$seasonName - $hostName"
+                        })
+                    }
+                }
+            }
+
+            // 2. GESTIONE LISTE CLASSICHE (se presenti)
+            document.select("ul.episodi li a, .entry-content p a").forEach { a ->
+                val epHref = a.attr("href")
+                val epName = a.text().trim()
+                // Evitiamo di duplicare se già preso dagli spoiler
+                if (epHref.startsWith("http") && episodes.none { it.data == epHref }) {
+                    if (epName.contains(Regex("\\d+x\\d+|Episodio|Stagione|Streaming", RegexOption.IGNORE_CASE))) {
+                        episodes.add(newEpisode(epHref) { this.name = epName })
+                    }
                 }
             }
             
@@ -121,9 +110,8 @@ class CB01Provider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val document = app.get(data).document
-        
-        // Estrae link da iframe, pulsanti download e aree spoiler
-        document.select("iframe, a.btn-download, .sp-body a, .entry-content iframe").forEach {
+        // CB01 a volte mette l'iframe direttamente nella pagina dell'episodio
+        document.select("iframe, a.btn-download, .sp-body a").forEach {
             val link = it.attr("src").ifEmpty { it.attr("href") }
             if (link.contains("http") && !link.contains("google") && !link.contains("facebook")) {
                 loadExtractor(link, data, subtitleCallback, callback)
