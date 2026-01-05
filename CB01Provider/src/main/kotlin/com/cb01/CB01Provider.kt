@@ -4,6 +4,8 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
 import org.jsoup.nodes.Element
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 
 class CB01Provider : MainAPI() {
     override var mainUrl = "https://cb01net.baby"
@@ -12,15 +14,12 @@ class CB01Provider : MainAPI() {
     override var lang = "it"
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
 
-    // MANTENGO LA TUA STRUTTURA ORIGINALE
     override val mainPage = mainPageOf(
         mainUrl to "Film",
         "$mainUrl/serietv" to "Serie TV"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        // Gestione corretta della paginazione per WordPress:
-        // Se page è 1 non aggiunge nulla, altrimenti aggiunge /page/X
         val url = if (page <= 1) {
             request.data
         } else {
@@ -34,22 +33,36 @@ class CB01Provider : MainAPI() {
         return newHomePageResponse(request.name, home)
     }
 
-    override suspend fun search(query: String): List<SearchResponse> {
-        val url = "$mainUrl/?s=$query"
-        val document = app.get(url).document
-
-        return document.select("div.card, div.post-item, article").mapNotNull {
-            it.toSearchResult()
+    // RICERCA DOPPIA: Film + Serie TV
+    override suspend fun search(query: String): List<SearchResponse> = coroutineScope {
+        // Eseguiamo le due ricerche in parallelo per essere più veloci
+        val movieSearch = async { 
+            try {
+                app.get("$mainUrl/?s=$query").document.select("div.card, div.post-item, article").mapNotNull { it.toSearchResult() }
+            } catch (e: Exception) { emptyList<SearchResponse>() }
         }
+        
+        val tvSearch = async { 
+            try {
+                app.get("$mainUrl/serietv/?s=$query").document.select("div.card, div.post-item, article").mapNotNull { it.toSearchResult() }
+            } catch (e: Exception) { emptyList<SearchResponse>() }
+        }
+
+        // Uniamo i risultati di entrambe le ricerche
+        return@coroutineScope movieSearch.await() + tvSearch.await()
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
         val title = this.selectFirst(".card-title a, h2 a, .post-title a")?.text()?.trim() ?: return null
         val href = this.selectFirst("a")?.attr("href") ?: return null
+        
+        // Gestione Lazy Load (data-src) presente nel codice inviato
         val posterUrl = this.selectFirst("img")?.let { 
-            it.attr("data-src").ifEmpty { it.attr("src") } 
+            val dataSrc = it.attr("data-src")
+            if (dataSrc.isNotEmpty()) dataSrc else it.attr("src")
         }
 
+        // Rilevamento automatico se è una serie o un film dal link
         return if (href.contains("/serietv/") || title.contains("Serie TV", true)) {
             newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
                 this.posterUrl = posterUrl
@@ -72,12 +85,12 @@ class CB01Provider : MainAPI() {
         val isTvSeries = url.contains("/serietv/") || document.selectFirst("ul.episodi") != null
 
         return if (isTvSeries) {
-            // CORREZIONE DEFINITIVA ERRORE COMPILAZIONE
             val episodes = document.select("ul.episodi li").mapNotNull {
                 val link = it.select("a").attr("href")
                 val name = it.text().trim()
                 if (link.isNullOrBlank()) return@mapNotNull null
                 
+                // USA newEpisode per evitare errori di compilazione
                 newEpisode(link) {
                     this.name = name
                 }
@@ -101,6 +114,7 @@ class CB01Provider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val document = app.get(data).document
+        // Estrazione link dai player e dagli spoiler (classe .sp-body tipica di CB01)
         document.select("iframe, a.btn-download, .sp-body a").forEach {
             val link = it.attr("src").ifEmpty { it.attr("href") }
             if (link.contains("http") && !link.contains("google")) {
