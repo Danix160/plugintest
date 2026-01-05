@@ -12,24 +12,21 @@ class TantiFilmProvider : MainAPI() {
     override var lang = "it"
     override val hasQuickSearch = true
 
-    // Importante: User-Agent reale per evitare blocchi "UnknownHost/Protocol"
-    override val headers = mapOf(
+    // RIMOSSO 'override' perché causa l'errore di compilazione
+    val myHeaders = mapOf(
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Origin" to mainUrl,
         "Referer" to "$mainUrl/"
     )
 
     override val mainPage = mainPageOf(
-        "$mainUrl/film" to "Film HD",
-        "$mainUrl/serie-tv" to "Serie TV"
+        "$mainUrl/film-streaming-hd/" to "Film HD",
+        "$mainUrl/serie-tv-streaming/" to "Serie TV",
+        "$mainUrl/prime-visioni/" to "Prime Visioni"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        // Gestione corretta della paginazione DLE
         val url = if (page <= 1) request.data else "${request.data}page/$page/"
-        
-        // Usiamo safeApiCall per evitare crash se il DNS fallisce
-        val document = app.get(url, headers = headers).document
+        val document = app.get(url, headers = myHeaders).document
         val home = document.select("div.mov").mapNotNull {
             it.toSearchResult()
         }
@@ -38,7 +35,7 @@ class TantiFilmProvider : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/index.php?do=search&subaction=search&story=$query"
-        val document = app.get(url, headers = headers).document
+        val document = app.get(url, headers = myHeaders).document
 
         return document.select("div.mov").mapNotNull {
             it.toSearchResult()
@@ -46,16 +43,16 @@ class TantiFilmProvider : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val document = app.get(url, headers = headers).document
+        val document = app.get(url, headers = myHeaders).document
 
         val title = document.selectFirst("h1")?.text()?.trim() ?: ""
         val poster = document.selectFirst("div.short-img img")?.attr("abs:src")
         val description = document.selectFirst("div.full-text")?.text()?.trim()
         
-        // Verifica se è una serie TV per mostrare i tasti degli episodi
-        val isSerie = url.contains("/serie-tv") || document.selectFirst("div.video-series") != null
+        val isSerie = url.contains("/serie-tv")
 
         return if (isSerie) {
+            // CORREZIONE 2: Uso corretto di newTvSeriesLoadResponse
             newTvSeriesLoadResponse(title, url, TvType.TvSeries, url) {
                 this.posterUrl = poster
                 this.plot = description
@@ -74,9 +71,8 @@ class TantiFilmProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val document = app.get(data, headers = headers).document
+        val document = app.get(data, headers = myHeaders).document
         
-        // Cerca tutti gli iframe dei player
         document.select("iframe").forEach { iframe ->
             val source = iframe.attr("abs:src")
             if (source.isNotEmpty() && !source.contains("google") && !source.contains("facebook")) {
@@ -87,7 +83,6 @@ class TantiFilmProvider : MainAPI() {
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        // Selettori specifici per il template di TantiFilm
         val titleElement = this.selectFirst("a.short-title") ?: return null
         val title = titleElement.text().trim()
         val href = titleElement.attr("abs:href")
