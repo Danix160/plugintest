@@ -10,5 +10,5 @@ cloudstream {
     tvTypes = listOf("Movie", "TvSeries")
     requiresResources = false
     language = "it"
-    iconUrl = "https://tanti-film.stream/templates/tantifilm/images/favicon.ico"
+    iconUrl = "https://www.youtube.com/s/desktop/711fd789/img/logos/favicon_144x144.png"
 }
