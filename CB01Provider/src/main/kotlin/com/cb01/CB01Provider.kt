@@ -1,4 +1,4 @@
-package com.lagradost.cloudstream3.movieproviders
+package com.cb01
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
