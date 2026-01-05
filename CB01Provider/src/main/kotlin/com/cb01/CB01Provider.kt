@@ -26,6 +26,7 @@ class CB01Provider : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse> {
         val allResults = mutableListOf<SearchResponse>()
+        // Cerchiamo in entrambi i database (Film e Serie)
         val searchPaths = listOf("$mainUrl/?s=", "$mainUrl/serietv/?s=")
         
         searchPaths.forEach { path ->
@@ -65,7 +66,7 @@ class CB01Provider : MainAPI() {
         return if (isTvSeries) {
             val episodes = mutableListOf<Episode>()
             
-            // 1. GESTIONE SPOILER (sp-wrap) - Come nel tuo esempio
+            // Gestione dei blocchi Spoiler (Stagioni)
             document.select("div.sp-wrap").forEach { wrap ->
                 val seasonName = wrap.selectFirst(".sp-head")?.text()?.trim() ?: "Serie"
                 wrap.select(".sp-body a").forEach { a ->
@@ -79,14 +80,13 @@ class CB01Provider : MainAPI() {
                 }
             }
 
-            // 2. GESTIONE LISTE CLASSICHE (se presenti)
-            document.select("ul.episodi li a, .entry-content p a").forEach { a ->
-                val epHref = a.attr("href")
-                val epName = a.text().trim()
-                // Evitiamo di duplicare se già preso dagli spoiler
-                if (epHref.startsWith("http") && episodes.none { it.data == epHref }) {
-                    if (epName.contains(Regex("\\d+x\\d+|Episodio|Stagione|Streaming", RegexOption.IGNORE_CASE))) {
-                        episodes.add(newEpisode(epHref) { this.name = epName })
+            // Aggiunta link liberi nella pagina (se non già presenti)
+            document.select(".entry-content p a, .entry-content li a").forEach { a ->
+                val href = a.attr("href")
+                val text = a.text()
+                if (href.contains("http") && episodes.none { it.data == href }) {
+                    if (text.contains(Regex("\\d+x\\d+|Episodio|Stagione|Streaming", RegexOption.IGNORE_CASE))) {
+                        episodes.add(newEpisode(href) { this.name = text })
                     }
                 }
             }
@@ -109,12 +109,29 @@ class CB01Provider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val document = app.get(data).document
-        // CB01 a volte mette l'iframe direttamente nella pagina dell'episodio
-        document.select("iframe, a.btn-download, .sp-body a").forEach {
-            val link = it.attr("src").ifEmpty { it.attr("href") }
-            if (link.contains("http") && !link.contains("google") && !link.contains("facebook")) {
-                loadExtractor(link, data, subtitleCallback, callback)
+        // 1. Carichiamo la pagina (potrebbe essere CB01 o l'intermedio come uprot)
+        val doc = app.get(data).document
+        
+        // 2. Cerchiamo tutti i possibili link video (iframe o anchor)
+        val sources = doc.select("iframe, a").mapNotNull { 
+            it.attr("src").ifEmpty { it.attr("href") }.takeIf { s -> s.startsWith("http") }
+        }.distinct()
+
+        sources.forEach { link ->
+            // Se è un link intermedio (uprot, maxstream, ecc.), lo carichiamo ricorsivamente
+            if (link.contains("uprot.net") || link.contains("maxstream")) {
+                val subDoc = app.get(link).document
+                subDoc.select("iframe, a").forEach { subElement ->
+                    val finalLink = subElement.attr("src").ifEmpty { subElement.attr("href") }
+                    if (finalLink.startsWith("http")) {
+                        loadExtractor(finalLink, link, subtitleCallback, callback)
+                    }
+                }
+            } else {
+                // Altrimenti proviamo l'estrazione diretta
+                if (!link.contains("google") && !link.contains("facebook") && !link.contains("whatsapp")) {
+                    loadExtractor(link, data, subtitleCallback, callback)
+                }
             }
         }
         return true
