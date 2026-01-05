@@ -12,13 +12,12 @@ class TantiFilmProvider : MainAPI() {
     override var lang = "it"
     override val hasQuickSearch = true
 
-    // Headers personalizzati per evitare errori di ereditarietà (niente 'override')
+    // Headers senza override
     val pluginHeaders = mapOf(
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
         "Referer" to "$mainUrl/"
     )
 
-    // MainPage aggiornata: rimosso "Prime Visioni" come richiesto
     override val mainPage = mainPageOf(
         "$mainUrl/film/" to "Film HD",
         "$mainUrl/serie-tv/" to "Serie TV"
@@ -52,9 +51,11 @@ class TantiFilmProvider : MainAPI() {
         val isSerie = url.contains("/serie-tv")
 
         return if (isSerie) {
-            // Fix per l'errore di compilazione: passiamo una lista di oggetti Episode
+            // SOLUZIONE: Usiamo newEpisode() invece del costruttore diretto per evitare il warning/error di deprecation
             val episodes = listOf(
-                Episode(url, "Guarda Episodio")
+                newEpisode(url) {
+                    this.name = "Guarda Episodio"
+                }
             )
             newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
                 this.posterUrl = poster
@@ -76,7 +77,6 @@ class TantiFilmProvider : MainAPI() {
     ): Boolean {
         val document = app.get(data, headers = pluginHeaders).document
         
-        // Estrazione link dai vari player (iframe)
         document.select("iframe").forEach { iframe ->
             val source = iframe.attr("abs:src")
             if (source.isNotEmpty() && !source.contains("google") && !source.contains("facebook")) {
