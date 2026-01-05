@@ -26,12 +26,9 @@ class CB01Provider : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse> {
         val allResults = mutableListOf<SearchResponse>()
-        val searchPaths = listOf("$mainUrl/?s=", "$mainUrl/serietv/?s=")
-        
-        searchPaths.forEach { path ->
+        listOf("$mainUrl/?s=", "$mainUrl/serietv/?s=").forEach { path ->
             try {
-                val doc = app.get(path + query).document
-                doc.select("div.card, div.post-item, article.card").forEach {
+                app.get(path + query).document.select("div.card, div.post-item, article.card").forEach {
                     it.toSearchResult()?.let { result -> allResults.add(result) }
                 }
             } catch (e: Exception) { }
@@ -60,37 +57,30 @@ class CB01Provider : MainAPI() {
         }
         val plot = document.selectFirst(".entry-content p, .card-text")?.text()
         
-        val isTvSeries = url.contains("/serietv/") || document.selectFirst(".sp-wrap, ul.episodi") != null
+        val isTvSeries = url.contains("/serietv/") || document.selectFirst(".sp-wrap") != null
 
         return if (isTvSeries) {
             val episodes = mutableListOf<Episode>()
             
-            // 1. Estrazione dagli SPOILER (classico delle serie TV su CB01)
-            document.select("div.sp-wrap").forEach { wrap ->
-                val seasonName = wrap.selectFirst(".sp-head")?.text()?.trim() ?: "Serie"
+            // Ogni spoiler (sp-wrap) diventa una stagione
+            document.select("div.sp-wrap").forEachIndexed { index, wrap ->
+                val seasonNumber = index + 1
+                val seasonName = wrap.selectFirst(".sp-head")?.text()?.trim() ?: "Stagione $seasonNumber"
+                
+                // Troviamo i link (es. quelli che portano a uprot)
                 wrap.select(".sp-body a").forEach { a ->
-                    val epHref = a.attr("href")
-                    val hostLabel = a.text().trim()
-                    if (epHref.startsWith("http")) {
-                        episodes.add(newEpisode(epHref) {
-                            this.name = "$seasonName - $hostLabel"
+                    val href = a.attr("href")
+                    if (href.startsWith("http")) {
+                        // Se il link è un aggregatore come uprot, Cloudstream caricherà gli episodi da lì
+                        episodes.add(newEpisode(href) {
+                            this.name = a.text().trim()
+                            this.season = seasonNumber
+                            this.episode = null // Lasciamo null se non conosciamo il numero esatto, o lo estraiamo dal testo
                         })
                     }
                 }
             }
 
-            // 2. Estrazione da link liberi nel testo (se non già presi)
-            document.select(".entry-content a").forEach { a ->
-                val href = a.attr("href")
-                val name = a.text()
-                if (href.startsWith("http") && episodes.none { it.data == href }) {
-                    // Prendi link che sembrano episodi o che puntano a uprot/maxstream
-                    if (name.contains(Regex("\\d+", RegexOption.IGNORE_CASE)) || href.contains("uprot") || href.contains("maxstream")) {
-                        episodes.add(newEpisode(href) { this.name = name })
-                    }
-                }
-            }
-            
             newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
                 this.posterUrl = poster
                 this.plot = plot
@@ -109,32 +99,20 @@ class CB01Provider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // Se il link è già un video diretto o un host supportato (Mixdrop, ecc.), loadExtractor lo gestisce
+        // Se è un link diretto a un video host supportato
         if (loadExtractor(data, data, subtitleCallback, callback)) return true
 
-        // Altrimenti, carichiamo la pagina (uprot, maxstream, o CB01 stessa) per cercare iframe o altri link
+        // Se è un link a uprot.net o simili, carichiamo la pagina per trovare gli episodi/video reali
         val doc = try { app.get(data).document } catch (e: Exception) { return false }
         
-        // Cerchiamo tutti i link e iframe nella pagina caricata
-        val potentialLinks = doc.select("iframe, a").mapNotNull { 
+        val links = doc.select("iframe, a").mapNotNull { 
             it.attr("src").ifEmpty { it.attr("href") }.takeIf { s -> s.startsWith("http") }
         }.distinct()
 
-        potentialLinks.forEach { link ->
-            // Se troviamo un link a uprot/maxstream dentro un'altra pagina, facciamo un altro salto
-            if (link.contains("uprot.net") || link.contains("maxstream") || link.contains("akvideo")) {
-                val subDoc = app.get(link).document
-                subDoc.select("iframe, a").forEach { subA ->
-                    val finalLink = subA.attr("src").ifEmpty { subA.attr("href") }
-                    if (finalLink.startsWith("http")) {
-                        loadExtractor(finalLink, link, subtitleCallback, callback)
-                    }
-                }
-            } else {
-                // Pulizia link social/pubblicità
-                if (!link.contains(Regex("google|facebook|whatsapp|twitter|pinterest"))) {
-                    loadExtractor(link, data, subtitleCallback, callback)
-                }
+        links.forEach { link ->
+            // Se dentro uprot troviamo altri link (Mixdrop, Supervideo, ecc.)
+            if (!link.contains(Regex("google|facebook|whatsapp|twitter|amazon|apple"))) {
+                loadExtractor(link, data, subtitleCallback, callback)
             }
         }
         return true
