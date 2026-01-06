@@ -61,46 +61,58 @@ class CB01Provider : MainAPI() {
         return if (isTvSeries) {
             val episodes = mutableListOf<Episode>()
             
-            // Analizziamo ogni Spoiler come una Stagione
-            document.select("div.sp-wrap").forEachIndexed { index, wrap ->
+            // 1. Cerchiamo gli spoiler (Stagioni)
+            val spoilers = document.select("div.sp-wrap")
+            
+            for ((index, wrap) in spoilers.withIndex()) {
                 val seasonHeader = wrap.selectFirst(".sp-head")?.text()?.trim() ?: "Stagione ${index + 1}"
                 val seasonNum = index + 1
                 
-                // Cerchiamo i link dentro lo spoiler (che mandano a uprot)
-                wrap.select(".sp-body a").forEach { a ->
+                // 2. Cerchiamo i link come Maxstream/Uprot
+                val links = wrap.select(".sp-body a")
+                for (a in links) {
                     val uprotUrl = a.attr("href")
                     
-                    if (uprotUrl.contains("uprot.net") || uprotUrl.contains("maxstream")) {
+                    if (uprotUrl.contains("uprot.net") || uprotUrl.contains("maxstream") || uprotUrl.contains("akvideo")) {
                         try {
-                            // Carichiamo la pagina di uprot per vedere gli episodi reali
+                            // CARICAMENTO PROFONDO: Entriamo in uprot per prendere la lista
                             val uprotPage = app.get(uprotUrl).document
                             
-                            // Cerchiamo tutti i link agli episodi (spesso sono in una tabella o lista)
-                            uprotPage.select("a").forEach { epLink ->
+                            // 3. Cerchiamo i link agli episodi reali nella tabella di uprot
+                            // Di solito sono dentro <a> che contengono il numero dell'episodio
+                            val realEpLinks = uprotPage.select("a[href*='/msfld/'], a[href*='/v/'], table a")
+                            
+                            realEpLinks.forEach { epLink ->
                                 val finalHref = epLink.attr("href")
                                 val epName = epLink.text().trim()
                                 
-                                // Filtriamo i link che sembrano veri episodi
-                                if (finalHref.startsWith("http") && (epName.contains(Regex("\\d+")) || epName.lowercase().contains("episodio"))) {
+                                if (finalHref.startsWith("http") && epName.isNotEmpty()) {
                                     episodes.add(newEpisode(finalHref) {
                                         this.name = epName
                                         this.season = seasonNum
-                                        // Mostriamo il nome della stagione nel nome episodio per chiarezza
-                                        this.episode = null 
                                         this.description = seasonHeader
                                     })
                                 }
                             }
-                        } catch (e: Exception) {
-                            // Se non riesce a leggere uprot, aggiunge il link base come fallback
-                            episodes.add(newEpisode(uprotUrl) {
-                                this.name = a.text()
-                                this.season = seasonNum
-                            })
+                        } catch (e: Exception) { 
+                            // Fallback se uprot non risponde
                         }
                     }
                 }
             }
+
+            // Se non abbiamo trovato nulla con uprot, aggiungiamo i link dello spoiler come episodi diretti
+            if (episodes.isEmpty()) {
+                document.select("div.sp-wrap").forEachIndexed { idx, wrap ->
+                    wrap.select(".sp-body a").forEach { a ->
+                        episodes.add(newEpisode(a.attr("href")) {
+                            this.name = a.text()
+                            this.season = idx + 1
+                        })
+                    }
+                }
+            }
+
             newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) { this.posterUrl = poster }
         } else {
             newMovieLoadResponse(title, url, TvType.Movie, url) { this.posterUrl = poster }
@@ -113,12 +125,12 @@ class CB01Provider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // Se il link è un video diretto, l'extractor lo prende
         if (loadExtractor(data, data, subtitleCallback, callback)) return true
 
-        // Se è rimasto un link di una pagina che contiene il video (es. Mixdrop)
         val doc = try { app.get(data).document } catch (e: Exception) { return false }
-        doc.select("iframe, a").forEach {
+        
+        // Cerca iframe o link finali (Mixdrop, Supervideo ecc.)
+        doc.select("iframe, a.btn, .download-link a").forEach {
             val link = it.attr("src").ifEmpty { it.attr("href") }
             if (link.startsWith("http") && !link.contains("google")) {
                 loadExtractor(link, data, subtitleCallback, callback)
