@@ -12,32 +12,23 @@ class CB01Provider : MainAPI() {
     override var lang = "it"
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
 
-    // Definiamo le sezioni della Home
     override val mainPage = mainPageOf(
         mainUrl to "Film",
         "$mainUrl/serietv" to "Serie TV"
     )
 
-    // FIX: Implementazione corretta di getMainPage
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = if (page <= 1) request.data else "${request.data.removeSuffix("/")}/page/$page/"
         val document = app.get(url).document
-        val home = document.select("div.card, div.post-item, article.card").mapNotNull {
-            it.toSearchResult()
-        }
+        val home = document.select("div.card, div.post-item, article.card").mapNotNull { it.toSearchResult() }
         return newHomePageResponse(request.name, home)
     }
 
-    // FIX: Implementazione corretta di search
     override suspend fun search(query: String): List<SearchResponse> {
         val allResults = mutableListOf<SearchResponse>()
-        // Cerchiamo sia nei film che nelle serie
-        val searchUrls = listOf("$mainUrl/?s=$query", "$mainUrl/serietv/?s=$query")
-        
-        for (url in searchUrls) {
+        listOf("$mainUrl/?s=$query", "$mainUrl/serietv/?s=$query").forEach { path ->
             try {
-                val doc = app.get(url).document
-                doc.select("div.card, div.post-item, article.card").forEach {
+                app.get(path).document.select("div.card, div.post-item, article.card").forEach {
                     it.toSearchResult()?.let { result -> allResults.add(result) }
                 }
             } catch (e: Exception) { }
@@ -69,16 +60,44 @@ class CB01Provider : MainAPI() {
 
         return if (isTvSeries) {
             val episodes = mutableListOf<Episode>()
-            // Trasformiamo gli spoiler in stagioni
+            
+            // Analizziamo ogni Spoiler come una Stagione
             document.select("div.sp-wrap").forEachIndexed { index, wrap ->
-                val seasonName = wrap.selectFirst(".sp-head")?.text()?.trim() ?: "Stagione ${index + 1}"
+                val seasonHeader = wrap.selectFirst(".sp-head")?.text()?.trim() ?: "Stagione ${index + 1}"
+                val seasonNum = index + 1
+                
+                // Cerchiamo i link dentro lo spoiler (che mandano a uprot)
                 wrap.select(".sp-body a").forEach { a ->
-                    val link = a.attr("href")
-                    if (link.startsWith("http")) {
-                        episodes.add(newEpisode(link) {
-                            this.name = "$seasonName - ${a.text()}"
-                            this.season = index + 1
-                        })
+                    val uprotUrl = a.attr("href")
+                    
+                    if (uprotUrl.contains("uprot.net") || uprotUrl.contains("maxstream")) {
+                        try {
+                            // Carichiamo la pagina di uprot per vedere gli episodi reali
+                            val uprotPage = app.get(uprotUrl).document
+                            
+                            // Cerchiamo tutti i link agli episodi (spesso sono in una tabella o lista)
+                            uprotPage.select("a").forEach { epLink ->
+                                val finalHref = epLink.attr("href")
+                                val epName = epLink.text().trim()
+                                
+                                // Filtriamo i link che sembrano veri episodi
+                                if (finalHref.startsWith("http") && (epName.contains(Regex("\\d+")) || epName.lowercase().contains("episodio"))) {
+                                    episodes.add(newEpisode(finalHref) {
+                                        this.name = epName
+                                        this.season = seasonNum
+                                        // Mostriamo il nome della stagione nel nome episodio per chiarezza
+                                        this.episode = null 
+                                        this.description = seasonHeader
+                                    })
+                                }
+                            }
+                        } catch (e: Exception) {
+                            // Se non riesce a leggere uprot, aggiunge il link base come fallback
+                            episodes.add(newEpisode(uprotUrl) {
+                                this.name = a.text()
+                                this.season = seasonNum
+                            })
+                        }
                     }
                 }
             }
@@ -94,17 +113,16 @@ class CB01Provider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // Se è un link a uprot/maxstream, carichiamo la pagina interna
-        if (data.contains("uprot.net") || data.contains("maxstream")) {
-            val doc = app.get(data).document
-            doc.select("a, iframe").forEach {
-                val link = it.attr("href").ifEmpty { it.attr("src") }
-                if (link.startsWith("http") && !link.contains("cb01")) {
-                    loadExtractor(link, data, subtitleCallback, callback)
-                }
+        // Se il link è un video diretto, l'extractor lo prende
+        if (loadExtractor(data, data, subtitleCallback, callback)) return true
+
+        // Se è rimasto un link di una pagina che contiene il video (es. Mixdrop)
+        val doc = try { app.get(data).document } catch (e: Exception) { return false }
+        doc.select("iframe, a").forEach {
+            val link = it.attr("src").ifEmpty { it.attr("href") }
+            if (link.startsWith("http") && !link.contains("google")) {
+                loadExtractor(link, data, subtitleCallback, callback)
             }
-        } else {
-            loadExtractor(data, data, subtitleCallback, callback)
         }
         return true
     }
