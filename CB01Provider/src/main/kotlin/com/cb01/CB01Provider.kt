@@ -1,7 +1,8 @@
 package com.cb01
 
 import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.utils.*
+import com.lagradost.cloudstream3.utils.loadExtractor
+import com.lagradost.cloudstream3.utils.newHomePageResponse
 import org.jsoup.nodes.Element
 
 class CB01Provider : MainAPI() {
@@ -11,6 +12,11 @@ class CB01Provider : MainAPI() {
     override var lang = "it"
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
 
+    private val commonHeaders = mapOf(
+        "Referer" to "$mainUrl/",
+        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    )
+
     override val mainPage = mainPageOf(
         mainUrl to "Film",
         "$mainUrl/serietv" to "Serie TV"
@@ -18,7 +24,7 @@ class CB01Provider : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = if (page <= 1) request.data else "${request.data.removeSuffix("/")}/page/$page/"
-        val document = app.get(url).document
+        val document = app.get(url, headers = commonHeaders).document
         val home = document.select("div.card, div.post-item, article.card").mapNotNull { it.toSearchResult() }
         return newHomePageResponse(request.name, home)
     }
@@ -27,7 +33,7 @@ class CB01Provider : MainAPI() {
         val allResults = mutableListOf<SearchResponse>()
         listOf("$mainUrl/?s=$query", "$mainUrl/serietv/?s=$query").forEach { path ->
             try {
-                app.get(path).document.select("div.card, div.post-item, article.card").forEach {
+                app.get(path, headers = commonHeaders).document.select("div.card, div.post-item, article.card").forEach {
                     it.toSearchResult()?.let { result -> allResults.add(result) }
                 }
             } catch (e: Exception) { }
@@ -49,7 +55,7 @@ class CB01Provider : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val document = app.get(url).document
+        val document = app.get(url, headers = commonHeaders).document
         val title = document.selectFirst("h1.entry-title, h1.card-title")?.text()?.trim() ?: ""
         val poster = document.selectFirst(".card-image img, .poster img, .entry-content img")?.let {
             it.attr("src").ifEmpty { it.attr("data-src") }
@@ -60,9 +66,10 @@ class CB01Provider : MainAPI() {
             val seasonNum = index + 1
             wrap.select(".sp-body a").forEach { a ->
                 val href = a.attr("href")
-                if (href.contains(Regex("maxstream|uprot|akvideo|delta"))) {
+                // Filtriamo solo i link che portano a liste di episodi o host diretti
+                if (href.contains(Regex("maxstream|uprot|akvideo|delta|mixdrop|vidoza"))) {
                     try {
-                        val listDoc = app.get(href).document
+                        val listDoc = app.get(href, headers = commonHeaders).document
                         listDoc.select("table td a, .list-group-item a").forEach { ep ->
                             val epUrl = ep.attr("href")
                             val epText = ep.text().trim()
@@ -81,6 +88,7 @@ class CB01Provider : MainAPI() {
         return if (episodes.isNotEmpty()) {
             newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) { this.posterUrl = poster }
         } else {
+            // Se non ci sono episodi definiti, trattiamolo come film usando l'URL stesso come data
             newMovieLoadResponse(title, url, TvType.Movie, url) { this.posterUrl = poster }
         }
     }
@@ -91,10 +99,12 @@ class CB01Provider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        if (loadExtractor(data, data, subtitleCallback, callback)) return true
+        // Proviamo a caricare l'URL data direttamente tramite extractor
+        loadExtractor(data, data, subtitleCallback, callback)
 
-        val doc = try { app.get(data).document } catch (e: Exception) { return false }
+        val doc = try { app.get(data, headers = commonHeaders).document } catch (e: Exception) { return false }
 
+        // Cerchiamo iframe (metodo standard)
         doc.select("iframe").forEach {
             val src = it.attr("src")
             if (src.startsWith("http") && !src.contains("google")) {
@@ -102,25 +112,8 @@ class CB01Provider : MainAPI() {
             }
         }
 
-        val scripts = doc.select("script").html()
-        if (scripts.contains("file:\"")) {
-            val videoUrl = scripts.substringAfter("file:\"").substringBefore("\"")
-            if (videoUrl.startsWith("http")) {
-                // CORREZIONE: Uso di newExtractorLink per evitare il deprecation error
-                callback.invoke(
-                    newExtractorLink(
-                        source = this.name,
-                        name = this.name,
-                        url = videoUrl,
-                        referer = data,
-                        quality = Qualities.Unknown.value,
-                        isM3u8 = videoUrl.contains(".m3u8")
-                    )
-                )
-            }
-        }
-
-        doc.select("a.btn, .download-link a").forEach {
+        // Cerchiamo link di streaming nei bottoni, simile a come hai fatto per ToonItalia
+        doc.select("a.btn, .download-link a, .sp-body a").forEach {
             val link = it.attr("href")
             if (link.startsWith("http") && !link.contains("cb01")) {
                 loadExtractor(link, data, subtitleCallback, callback)
