@@ -1,11 +1,8 @@
 package com.cb01
 
 import com.lagradost.cloudstream3.*
-// 1. Assicurati che gli import siano esattamente questi
 import com.lagradost.cloudstream3.utils.ExtractorLink
-import com.lagradost.cloudstream3.Qualities // Import fondamentale per le qualità
 import com.lagradost.cloudstream3.utils.loadExtractor
-// Rimuovi l'import di AppUtils.getName se ti dà errore
 import org.jsoup.nodes.Element
 
 class CB01Provider : MainAPI() {
@@ -95,33 +92,29 @@ class CB01Provider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // ... (caricamento iframes ecc) ...
+        if (loadExtractor(data, data, subtitleCallback, callback)) return true
 
-        // 2. Sostituisci il vecchio ExtractorLink con questo formato:
-        callback.invoke(
-            ExtractorLink(
-                source = this.name,
-                name = this.name,
-                url = videoUrl, // l'URL estratto
-                referer = data,
-                quality = Qualities.Unknown.value, // Ora Qualities sarà riconosciuto
-            )
-        )
-        return true
-    }
+        val doc = try { app.get(data).document } catch (e: Exception) { return false }
+
+        doc.select("iframe").forEach {
+            val src = it.attr("src")
+            if (src.startsWith("http") && !src.contains("google")) {
+                loadExtractor(src, data, subtitleCallback, callback)
+            }
+        }
 
         val scripts = doc.select("script").html()
         if (scripts.contains("file:\"")) {
             val videoUrl = scripts.substringAfter("file:\"").substringBefore("\"")
             if (videoUrl.startsWith("http")) {
-                // Usiamo il nuovo metodo consigliato per creare ExtractorLink
+                // Utilizzo del costruttore aggiornato per ExtractorLink
                 callback.invoke(
                     ExtractorLink(
                         source = this.name,
                         name = this.name,
                         url = videoUrl,
                         referer = data,
-                        quality = Qualities.Unknown.value // Qualities è ora disponibile tramite l'import corretto o l'enum interno
+                        quality = Qualities.Unknown.value
                     )
                 )
             }
