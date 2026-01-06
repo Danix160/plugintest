@@ -3,6 +3,7 @@ package com.cb01
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
+import com.lagradost.cloudstream3.utils.AppUtils.getName
 import org.jsoup.nodes.Element
 
 class CB01Provider : MainAPI() {
@@ -17,7 +18,37 @@ class CB01Provider : MainAPI() {
         "$mainUrl/serietv" to "Serie TV"
     )
 
-    // ... (getMainPage e search rimangono invariati)
+    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
+        val url = if (page <= 1) request.data else "${request.data.removeSuffix("/")}/page/$page/"
+        val document = app.get(url).document
+        val home = document.select("div.card, div.post-item, article.card").mapNotNull { it.toSearchResult() }
+        return newHomePageResponse(request.name, home)
+    }
+
+    override suspend fun search(query: String): List<SearchResponse> {
+        val allResults = mutableListOf<SearchResponse>()
+        listOf("$mainUrl/?s=$query", "$mainUrl/serietv/?s=$query").forEach { path ->
+            try {
+                app.get(path).document.select("div.card, div.post-item, article.card").forEach {
+                    it.toSearchResult()?.let { result -> allResults.add(result) }
+                }
+            } catch (e: Exception) { }
+        }
+        return allResults
+    }
+
+    private fun Element.toSearchResult(): SearchResponse? {
+        val title = this.selectFirst(".card-title a, h2 a, .post-title a")?.text()?.trim() ?: return null
+        val href = this.selectFirst("a")?.attr("href") ?: return null
+        val img = this.selectFirst("img")
+        val posterUrl = img?.attr("data-src")?.takeIf { it.isNotEmpty() } ?: img?.attr("src")
+
+        return if (href.contains("/serietv/")) {
+            newTvSeriesSearchResponse(title, href, TvType.TvSeries) { this.posterUrl = posterUrl }
+        } else {
+            newMovieSearchResponse(title, href, TvType.Movie) { this.posterUrl = posterUrl }
+        }
+    }
 
     override suspend fun load(url: String): LoadResponse {
         val document = app.get(url).document
@@ -27,18 +58,13 @@ class CB01Provider : MainAPI() {
         }
         
         val episodes = mutableListOf<Episode>()
-        
-        // Selettore specifico per gli spoiler di CB01 Serie TV
         document.select("div.sp-wrap").forEachIndexed { index, wrap ->
             val seasonNum = index + 1
-            // Cerchiamo i link che portano a Maxstream/Uprot/AkVideo
             wrap.select(".sp-body a").forEach { a ->
                 val href = a.attr("href")
                 if (href.contains(Regex("maxstream|uprot|akvideo|delta"))) {
                     try {
-                        // Entriamo nella pagina di Maxstream per leggere la tabella episodi
                         val listDoc = app.get(href).document
-                        // Cerchiamo i link dentro la tabella (solitamente hanno classe .btn o sono in <td>)
                         listDoc.select("table td a, .list-group-item a").forEach { ep ->
                             val epUrl = ep.attr("href")
                             val epText = ep.text().trim()
@@ -67,13 +93,10 @@ class CB01Provider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // Se il link è già un video (es. Mixdrop), caricalo direttamente
         if (loadExtractor(data, data, subtitleCallback, callback)) return true
 
-        // Se siamo su una pagina intermedia di Maxstream/Uprot
         val doc = try { app.get(data).document } catch (e: Exception) { return false }
 
-        // 1. Cerchiamo IFRAME (dove Maxstream nasconde il player vero)
         doc.select("iframe").forEach {
             val src = it.attr("src")
             if (src.startsWith("http") && !src.contains("google")) {
@@ -81,24 +104,23 @@ class CB01Provider : MainAPI() {
             }
         }
 
-        // 2. Cerchiamo script che caricano il video (es. jwplayer o setup)
         val scripts = doc.select("script").html()
         if (scripts.contains("file:\"")) {
             val videoUrl = scripts.substringAfter("file:\"").substringBefore("\"")
             if (videoUrl.startsWith("http")) {
+                // Usiamo il nuovo metodo consigliato per creare ExtractorLink
                 callback.invoke(
                     ExtractorLink(
-                        "Maxstream",
-                        "Maxstream",
-                        videoUrl,
-                        data,
-                        Qualities.Unknown.value
+                        source = this.name,
+                        name = this.name,
+                        url = videoUrl,
+                        referer = data,
+                        quality = Qualities.Unknown.value // Qualities è ora disponibile tramite l'import corretto o l'enum interno
                     )
                 )
             }
         }
 
-        // 3. Cerchiamo bottoni di redirect
         doc.select("a.btn, .download-link a").forEach {
             val link = it.attr("href")
             if (link.startsWith("http") && !link.contains("cb01")) {
