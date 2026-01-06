@@ -1,7 +1,10 @@
 package com.cb01
 
 import com.lagradost.cloudstream3.*
+import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
+import com.lagradost.cloudstream3.utils.AppUtils.parseJson
+import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.cloudstream3.utils.newHomePageResponse
 import org.jsoup.nodes.Element
 
@@ -66,7 +69,6 @@ class CB01Provider : MainAPI() {
             val seasonNum = index + 1
             wrap.select(".sp-body a").forEach { a ->
                 val href = a.attr("href")
-                // Filtriamo solo i link che portano a liste di episodi o host diretti
                 if (href.contains(Regex("maxstream|uprot|akvideo|delta|mixdrop|vidoza"))) {
                     try {
                         val listDoc = app.get(href, headers = commonHeaders).document
@@ -88,7 +90,6 @@ class CB01Provider : MainAPI() {
         return if (episodes.isNotEmpty()) {
             newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) { this.posterUrl = poster }
         } else {
-            // Se non ci sono episodi definiti, trattiamolo come film usando l'URL stesso come data
             newMovieLoadResponse(title, url, TvType.Movie, url) { this.posterUrl = poster }
         }
     }
@@ -99,12 +100,12 @@ class CB01Provider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // Proviamo a caricare l'URL data direttamente tramite extractor
+        // Proviamo il link diretto
         loadExtractor(data, data, subtitleCallback, callback)
 
         val doc = try { app.get(data, headers = commonHeaders).document } catch (e: Exception) { return false }
 
-        // Cerchiamo iframe (metodo standard)
+        // Cerca iframe
         doc.select("iframe").forEach {
             val src = it.attr("src")
             if (src.startsWith("http") && !src.contains("google")) {
@@ -112,7 +113,7 @@ class CB01Provider : MainAPI() {
             }
         }
 
-        // Cerchiamo link di streaming nei bottoni, simile a come hai fatto per ToonItalia
+        // Cerca link nei bottoni
         doc.select("a.btn, .download-link a, .sp-body a").forEach {
             val link = it.attr("href")
             if (link.startsWith("http") && !link.contains("cb01")) {
