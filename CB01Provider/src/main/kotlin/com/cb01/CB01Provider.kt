@@ -1,9 +1,12 @@
 package com.cb01
 
 import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
+import com.lagradost.cloudstream3.MainAPI
+import com.lagradost.cloudstream3.TvType
+import com.lagradost.cloudstream3.HomePageResponse
+import com.lagradost.cloudstream3.SearchResponse
 import org.jsoup.nodes.Element
 
 class CB01Provider : MainAPI() {
@@ -28,15 +31,16 @@ class CB01Provider : MainAPI() {
         val document = app.get(url, headers = commonHeaders).document
         val home = document.select("div.card, div.post-item, article.card").mapNotNull { it.toSearchResult() }
         
-        // Sostituito newHomePageResponse con il costruttore diretto per evitare errori di import
-        return HomePageResponse(request.name, home)
+        // CORREZIONE: Uso di newHomePageResponse con la lista di risultati
+        return newHomePageResponse(request.name, home)
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
         val allResults = mutableListOf<SearchResponse>()
         listOf("$mainUrl/?s=$query", "$mainUrl/serietv/?s=$query").forEach { path ->
             try {
-                app.get(path, headers = commonHeaders).document.select("div.card, div.post-item, article.card").forEach {
+                val document = app.get(path, headers = commonHeaders).document
+                document.select("div.card, div.post-item, article.card").forEach {
                     it.toSearchResult()?.let { result -> allResults.add(result) }
                 }
             } catch (e: Exception) { }
@@ -51,9 +55,13 @@ class CB01Provider : MainAPI() {
         val posterUrl = img?.attr("data-src")?.takeIf { it.isNotEmpty() } ?: img?.attr("src")
 
         return if (href.contains("/serietv/")) {
-            newTvSeriesSearchResponse(title, href, TvType.TvSeries) { this.posterUrl = posterUrl }
+            newTvSeriesSearchResponse(title, href, TvType.TvSeries) { 
+                this.posterUrl = posterUrl 
+            }
         } else {
-            newMovieSearchResponse(title, href, TvType.Movie) { this.posterUrl = posterUrl }
+            newMovieSearchResponse(title, href, TvType.Movie) { 
+                this.posterUrl = posterUrl 
+            }
         }
     }
 
@@ -100,12 +108,10 @@ class CB01Provider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // Tentativo diretto sull'URL dei dati
         loadExtractor(data, data, subtitleCallback, callback)
 
         val doc = try { app.get(data, headers = commonHeaders).document } catch (e: Exception) { return false }
 
-        // Iframe extraction
         doc.select("iframe").forEach {
             val src = it.attr("src")
             if (src.startsWith("http") && !src.contains("google")) {
@@ -113,7 +119,6 @@ class CB01Provider : MainAPI() {
             }
         }
 
-        // Button/Link extraction
         doc.select("a.btn, .download-link a, .sp-body a").forEach {
             val link = it.attr("href")
             if (link.startsWith("http") && !link.contains("cb01")) {
