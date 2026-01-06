@@ -2,6 +2,7 @@ package com.cb01
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.Qualities
 import com.lagradost.cloudstream3.utils.loadExtractor
 import org.jsoup.nodes.Element
 
@@ -107,17 +108,16 @@ class CB01Provider : MainAPI() {
         if (scripts.contains("file:\"")) {
             val videoUrl = scripts.substringAfter("file:\"").substringBefore("\"")
             if (videoUrl.startsWith("http")) {
-                // Utilizzo del costruttore aggiornato per ExtractorLink
-                callback.invoke(
-                    ExtractorLink(
-                        source = this.name,
-                        name = this.name,
-                        url = videoUrl,
-                        referer = data,
-                        quality = Qualities.Unknown.value
-                    )
-                )
-            }
+            callback.invoke(
+        E    xtractorLink(
+            source = this.name, // Sostituisce getName
+            name = this.name,
+            url = videoUrl,
+            referer = data,
+            quality = Qualities.Unknown.value // Richiede l'import di Qualities
+        )
+    )
+}
         }
 
         doc.select("a.btn, .download-link a").forEach {
