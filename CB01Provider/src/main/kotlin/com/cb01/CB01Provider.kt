@@ -106,9 +106,9 @@ class CB01Provider : MainAPI() {
         if (scripts.contains("file:\"")) {
             val videoUrl = scripts.substringAfter("file:\"").substringBefore("\"")
             if (videoUrl.startsWith("http")) {
-                // CORREZIONE DEFINITIVA: Utilizzo del costruttore non deprecato
+                // CORREZIONE: Uso di newExtractorLink per evitare il deprecation error
                 callback.invoke(
-                    ExtractorLink(
+                    newExtractorLink(
                         source = this.name,
                         name = this.name,
                         url = videoUrl,
