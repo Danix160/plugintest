@@ -1,11 +1,9 @@
 package com.cb01
 
 import com.lagradost.cloudstream3.*
+import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
-import com.lagradost.cloudstream3.utils.AppUtils.parseJson
-import com.lagradost.cloudstream3.utils.AppUtils.toJson
-import com.lagradost.cloudstream3.utils.newHomePageResponse
 import org.jsoup.nodes.Element
 
 class CB01Provider : MainAPI() {
@@ -29,7 +27,9 @@ class CB01Provider : MainAPI() {
         val url = if (page <= 1) request.data else "${request.data.removeSuffix("/")}/page/$page/"
         val document = app.get(url, headers = commonHeaders).document
         val home = document.select("div.card, div.post-item, article.card").mapNotNull { it.toSearchResult() }
-        return newHomePageResponse(request.name, home)
+        
+        // Sostituito newHomePageResponse con il costruttore diretto per evitare errori di import
+        return HomePageResponse(request.name, home)
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
@@ -100,12 +100,12 @@ class CB01Provider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // Proviamo il link diretto
+        // Tentativo diretto sull'URL dei dati
         loadExtractor(data, data, subtitleCallback, callback)
 
         val doc = try { app.get(data, headers = commonHeaders).document } catch (e: Exception) { return false }
 
-        // Cerca iframe
+        // Iframe extraction
         doc.select("iframe").forEach {
             val src = it.attr("src")
             if (src.startsWith("http") && !src.contains("google")) {
@@ -113,7 +113,7 @@ class CB01Provider : MainAPI() {
             }
         }
 
-        // Cerca link nei bottoni
+        // Button/Link extraction
         doc.select("a.btn, .download-link a, .sp-body a").forEach {
             val link = it.attr("href")
             if (link.startsWith("http") && !link.contains("cb01")) {
