@@ -1,4 +1,4 @@
-package com.example // Cambia con il pacchetto del tuo plugin
+package com.guardaplay // Cambia con il pacchetto del tuo plugin
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
