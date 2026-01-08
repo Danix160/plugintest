@@ -1,4 +1,4 @@
-package com.example // Cambia questo con il package del tuo plugin (es. com.guardaplay)
+package com.guardaplay // Cambia questo con il package del tuo plugin (es. com.guardaplay)
 
 import android.content.Context
 import com.lagradost.cloudstream3.*
