@@ -42,26 +42,6 @@
         "name": "OnlineserieProvider"
     },
     {
-        "iconUrl": "https://www.youtube.com/s/desktop/711fd789/img/logos/favicon_144x144.png",
-        "apiVersion": 1,
-        "repositoryUrl": "https://github.com/Danix160/plugintest",
-        "fileSize": 9532,
-        "status": 0,
-        "language": "it",
-        "authors": [
-            "Danix"
-        ],
-        "tvTypes": [
-            "Movie",
-            "TvSeries"
-        ],
-        "version": 31,
-        "internalName": "TantiFilmProvider",
-        "description": "Film e Serie TV",
-        "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/TantiFilmProvider.cs3",
-        "name": "TantiFilmProvider"
-    },
-    {
         "iconUrl": "https://toonitalia.xyz/wp-content/uploads/2023/08/cropped-Majintoon-192x192.jpg",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/Danix160/plugintest",
