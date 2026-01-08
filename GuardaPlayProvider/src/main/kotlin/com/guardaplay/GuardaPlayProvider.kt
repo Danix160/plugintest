@@ -3,17 +3,8 @@ package com.example // Cambia questo con il package del tuo plugin (es. com.guar
 import android.content.Context
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
 import org.jsoup.nodes.Element
-
-@CloudstreamPlugin
-class GuardaPlayPlugin : Plugin() {
-    override fun load(context: Context) {
-        // Registra il provider principale
-        registerMainAPI(GuardaPlayProvider())
-    }
-}
 
 class GuardaPlayProvider : MainAPI() {
     override var mainUrl = "https://guardaplay.bar"
