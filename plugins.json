@@ -20,6 +20,26 @@
         "name": "CB01Provider"
     },
     {
+        "iconUrl": "https://guardaplay.bar/wp-content/uploads/2025/12/cropped-guardaplaym.png",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/Danix160/plugintest",
+        "fileSize": 8309,
+        "status": 1,
+        "language": "it",
+        "authors": [
+            "Danix"
+        ],
+        "tvTypes": [
+            "Movie",
+            "TvSeries"
+        ],
+        "version": 21,
+        "internalName": "GuardaPlayProvider",
+        "description": "Film di Guardaplay",
+        "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/GuardaPlayProvider.cs3",
+        "name": "GuardaPlayProvider"
+    },
+    {
         "iconUrl": "https://onlineserietv.com/images/logo.svg",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/Danix160/plugintest",
