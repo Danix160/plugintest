@@ -5,7 +5,7 @@ import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
 import org.jsoup.nodes.Element
 
-class CBPlugin : MainAPI() {
+class CBProvider : MainAPI() {
     override var mainUrl = "https://cb001.uno"
     override var name = "CB01"
     override val hasMainPage = true
