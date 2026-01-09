@@ -16,11 +16,11 @@ class FilmezProvider : MainAPI() {
     private val cfInterceptor = CloudflareKiller()
 
     override val mainPage = mainPageOf(
-        "$mainUrl/page/" to "Film Recenti",
-        "$mainUrl/genere/animazione/page/" to "Animazione",
-        "$mainUrl/genere/azione/page/" to "Azione",
-        "$mainUrl/genere/commedia/page/" to "Commedia",
-        "$mainUrl/genere/horror/page/" to "Horror"
+        mainUrl to "Film Recenti",
+        "$mainUrl/?filter_genre=animazione" to "Animazione",
+        "$mainUrl/?filter_genre=action" to "Azione",
+        "$mainUrl/?filter_genre=fantascienza" to "Fantescienza",
+        "$mainUrl/?filter_genre=horror" to "Horror"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
