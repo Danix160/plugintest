@@ -8,6 +8,7 @@ import org.jsoup.nodes.Element
 class CBProvider : MainAPI() { 
     override var mainUrl = "https://cb001.uno"
     override var name = "CB"
+    override var iconUrl = "https://raw.githubusercontent.com/recloudstream/cloudstream-extensions/master/CloudStreamLogo.png"
     override val hasMainPage = true
     override var lang = "it"
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
