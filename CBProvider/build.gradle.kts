@@ -2,7 +2,7 @@ cloudstream {
     extra["prefix"] = "CB"
     extra["displayName"] = "CB"
     
-    version = 2
+    version = 3
     description = "CB001.uno"
     authors = listOf("Danix")
     
@@ -10,5 +10,5 @@ cloudstream {
     tvTypes = listOf("Movie", "TvSeries")
     requiresResources = false
     language = "it"
-    iconUrl = "https://cb001.uno/templates/CB01_bid/images/logocb2-1.jpg"
+    iconUrl = "https://cb01uno.uno/wp-content/uploads/2025/02/logo-cb01-it-com-film-streaming.png"
 }
