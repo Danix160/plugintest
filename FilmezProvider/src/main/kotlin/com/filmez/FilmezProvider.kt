@@ -12,31 +12,34 @@ class FilmezProvider : MainAPI() {
     override var lang = "it"
     override val hasMainPage = true
 
-    // Intercettore per bypassare Cloudflare
     private val cfInterceptor = CloudflareKiller()
 
+    // Corretti i percorsi dei generi in base alla struttura standard del sito
     override val mainPage = mainPageOf(
-        mainUrl to "Film Recenti",
-        "$mainUrl/?filter_genre=animazione" to "Animazione",
-        "$mainUrl/?filter_genre=action" to "Azione",
-        "$mainUrl/?filter_genre=fantascienza" to "Fantescienza",
-        "$mainUrl/?filter_genre=horror" to "Horror"
+        "$mainUrl/film/page/" to "Film Recenti",
+        "$mainUrl/genere/animazione/page/" to "Animazione",
+        "$mainUrl/genere/azione/page/" to "Azione",
+        "$mainUrl/genere/fantascienza/page/" to "Fantascienza",
+        "$mainUrl/genere/horror/page/" to "Horror"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        // Applichiamo l'intercettore Cloudflare alla richiesta
-        val document = app.get(request.data + page, interceptor = cfInterceptor).document
+        // Correzione: assicuriamoci che l'URL sia composto bene (es: .../page/1)
+        val url = "${request.data}$page/"
+        val document = app.get(url, interceptor = cfInterceptor).document
+        
         val home = document.select("article.masvideos-movie-grid-item, div.product").mapNotNull {
             it.toSearchResult()
         }
-        return newHomePageResponse(request.name, home)
+        return newHomePageResponse(request.name, home, hasNext = true)
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        val title = this.selectFirst(".masvideos-loop-movie__title, .product__title")?.text() ?: return null
-        val href = this.selectFirst("a")?.attr("href") ?: return null
+        // Selettore più preciso basato sui file txt forniti
+        val titleElement = this.selectFirst(".masvideos-loop-movie__title a, .product__title a")
+        val title = titleElement?.text() ?: return null
+        val href = titleElement.attr("href") ?: return null
         
-        // Gestione lazy loading per le immagini
         val posterUrl = this.selectFirst("img")?.attr("data-src") 
                         ?: this.selectFirst("img")?.attr("src")
 
@@ -46,6 +49,7 @@ class FilmezProvider : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
+        // Il sito usa ?s= per la ricerca
         val url = "$mainUrl/?s=$query&post_type=movie"
         val document = app.get(url, interceptor = cfInterceptor).document
         return document.select("article.masvideos-movie-grid-item, div.product").mapNotNull {
@@ -59,7 +63,6 @@ class FilmezProvider : MainAPI() {
         val title = document.selectFirst("h1.entry-title")?.text()?.trim() ?: ""
         val poster = document.selectFirst(".masvideos-movie__poster img")?.attr("src")
         
-        // Estrazione dettagli dal div.right-div (dall'HTML che hai fornito)
         val rightDiv = document.selectFirst("div.right-div")
         val description = rightDiv?.selectFirst("h2 + p")?.text() 
                           ?: document.selectFirst(".masvideos-movie__short-description")?.text()
@@ -82,20 +85,22 @@ class FilmezProvider : MainAPI() {
     ): Boolean {
         val document = app.get(data, interceptor = cfInterceptor).document
 
-        // 1. Estrazione dai link diretti (uprot.net) presenti nel div.right-div
+        // 1. Estrazione dai link diretti uprot.net
         document.select("div.right-div a[href*=uprot.net]").forEach { element ->
             val protectedUrl = element.attr("href")
             
-            // Seguiamo il redirect di uprot.net per arrivare al video hoster finale
-            val response = app.get(protectedUrl, interceptor = cfInterceptor, allowRedirects = true)
-            val finalUrl = response.url
-
-            // Carichiamo l'estrattore appropriato (MixDrop, MaxStream, ecc.)
-            loadExtractor(finalUrl, data, subtitleCallback, callback)
+            // Usiamo un try-catch per evitare che un link rotto blocchi gli altri
+            try {
+                val response = app.get(protectedUrl, interceptor = cfInterceptor, allowRedirects = true, timeout = 10)
+                val finalUrl = response.url
+                loadExtractor(finalUrl, data, subtitleCallback, callback)
+            } catch (e: Exception) {
+                // Log o ignora l'errore del singolo link
+            }
         }
 
-        // 2. Controllo secondario per iframe (se presenti)
-        document.select(".masvideos-movie__player-embed iframe, iframe").forEach { iframe ->
+        // 2. Controllo per iframe masvideos
+        document.select(".masvideos-movie__player-embed iframe, .video-container iframe").forEach { iframe ->
             val src = iframe.attr("src")
             if (src.isNotEmpty() && !src.contains("facebook.com")) {
                 loadExtractor(src, data, subtitleCallback, callback)
