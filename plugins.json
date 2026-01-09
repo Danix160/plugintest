@@ -23,14 +23,14 @@
         "iconUrl": "https://filmez.org/wp-content/uploads/2022/11/cropped-logo_filmez2.jpg",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/Danix160/plugintest",
+        "fileSize": 9795,
         "status": 1,
         "language": "it",
         "authors": [
             "Danix"
         ],
         "tvTypes": [
-            "Movie",
-            "TvSeries"
+            "Movie"
         ],
         "version": 1,
         "internalName": "FilmezProvider",
