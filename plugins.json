@@ -13,7 +13,7 @@
             "Movie",
             "TvSeries"
         ],
-        "version": 1,
+        "version": 2,
         "internalName": "CBProvider",
         "description": "CB001.uno",
         "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/CBProvider.cs3",
