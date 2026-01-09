@@ -23,7 +23,7 @@
         "iconUrl": "https://filmez.org/wp-content/uploads/2022/11/cropped-logo_filmez2.jpg",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/Danix160/plugintest",
-        "fileSize": 9795,
+        "fileSize": 9858,
         "status": 1,
         "language": "it",
         "authors": [
@@ -32,7 +32,7 @@
         "tvTypes": [
             "Movie"
         ],
-        "version": 1,
+        "version": 2,
         "internalName": "FilmezProvider",
         "description": "Archivio di Film del sito Filmez.org",
         "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/FilmezProvider.cs3",
