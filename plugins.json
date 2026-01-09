@@ -1,9 +1,9 @@
 [
     {
-        "iconUrl": "https://cb01.uno/apple-icon-180x180px.png",
+        "iconUrl": "https://cb001.uno/templates/CB01_bid/images/logocb2-1.jpg",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/Danix160/plugintest",
-        "fileSize": 12897,
+        "fileSize": 10660,
         "status": 1,
         "language": "it",
         "authors": [
@@ -13,11 +13,11 @@
             "Movie",
             "TvSeries"
         ],
-        "version": 13,
-        "internalName": "CB01Provider",
-        "description": "CineBlog01",
-        "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/CB01Provider.cs3",
-        "name": "CB01Provider"
+        "version": 1,
+        "internalName": "CBProvider",
+        "description": "CB001.uno",
+        "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/CBProvider.cs3",
+        "name": "CBProvider"
     },
     {
         "iconUrl": "https://filmez.org/wp-content/uploads/2022/11/cropped-logo_filmez2.jpg",
