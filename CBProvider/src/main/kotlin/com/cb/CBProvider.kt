@@ -7,7 +7,7 @@ import org.jsoup.nodes.Element
 
 class CBProvider : MainAPI() { 
     override var mainUrl = "https://cb001.uno"
-    override var name = "CB01"
+    override var name = "CB"
     override val hasMainPage = true
     override var lang = "it"
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
