@@ -20,6 +20,25 @@
         "name": "CB01Provider"
     },
     {
+        "iconUrl": "https://filmez.org/wp-content/uploads/2022/11/cropped-logo_filmez2.jpg",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/Danix160/plugintest",
+        "status": 1,
+        "language": "it",
+        "authors": [
+            "Danix"
+        ],
+        "tvTypes": [
+            "Movie",
+            "TvSeries"
+        ],
+        "version": 1,
+        "internalName": "FilmezProvider",
+        "description": "Archivio di Film del sito Filmez.org",
+        "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/FilmezProvider.cs3",
+        "name": "FilmezProvider"
+    },
+    {
         "iconUrl": "https://guardaplay.bar/wp-content/uploads/2025/12/cropped-guardaplaym.png",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/Danix160/plugintest",
