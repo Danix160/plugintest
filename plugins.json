@@ -1,9 +1,9 @@
 [
     {
-        "iconUrl": "https://cb001.uno/templates/CB01_bid/images/logocb2-1.jpg",
+        "iconUrl": "https://cb01uno.uno/wp-content/uploads/2025/02/logo-cb01-it-com-film-streaming.png",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/Danix160/plugintest",
-        "fileSize": 11230,
+        "fileSize": 11234,
         "status": 1,
         "language": "it",
         "authors": [
@@ -13,7 +13,7 @@
             "Movie",
             "TvSeries"
         ],
-        "version": 2,
+        "version": 3,
         "internalName": "CBProvider",
         "description": "CB001.uno",
         "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/CBProvider.cs3",
