@@ -2,7 +2,7 @@ cloudstream {
     extra["prefix"] = "Filmez"
     extra["displayName"] = "Filmez"
     
-    version = 2
+    version = 3
     description = "Archivio di Film del sito Filmez.org"
     authors = listOf("Danix")
     
