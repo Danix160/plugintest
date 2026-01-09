@@ -12,21 +12,23 @@ class FilmezProvider : MainAPI() {
     override var lang = "it"
     override val hasMainPage = true
 
+    // 1. Aggiungiamo un User-Agent fisso per evitare che Cloudflare si insospettisca
+    // cambiando browser tra la richiesta e la WebView
+    private val userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
     private val cfInterceptor = CloudflareKiller()
 
-    // Corretti i percorsi dei generi in base alla struttura standard del sito
-    override val mainPage = mainPageOf(
-        "$mainUrl/film/page/" to "Film Recenti",
-        "$mainUrl/genere/animazione/page/" to "Animazione",
-        "$mainUrl/genere/azione/page/" to "Azione",
-        "$mainUrl/genere/fantascienza/page/" to "Fantascienza",
-        "$mainUrl/genere/horror/page/" to "Horror"
-    )
+    // Configura i client appena il provider viene inizializzato
+    init {
+        app.defaultClient.interceptors.add(cfInterceptor)
+    }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        // Correzione: assicuriamoci che l'URL sia composto bene (es: .../page/1)
-        val url = "${request.data}$page/"
-        val document = app.get(url, interceptor = cfInterceptor).document
+        // 2. Usiamo l'URL corretto per la paginazione che avevamo individuato
+        val url = if (page <= 1) request.data else "${request.data}page/$page/"
+        
+        // Aggiungiamo l'header User-Agent manualmente per sicurezza
+        val document = app.get(url, interceptor = cfInterceptor, headers = mapOf("User-Agent" to userAgent)).document
         
         val home = document.select("article.masvideos-movie-grid-item, div.product").mapNotNull {
             it.toSearchResult()
@@ -34,29 +36,17 @@ class FilmezProvider : MainAPI() {
         return newHomePageResponse(request.name, home, hasNext = true)
     }
 
-    private fun Element.toSearchResult(): SearchResponse? {
-        // Selettore più preciso basato sui file txt forniti
-        val titleElement = this.selectFirst(".masvideos-loop-movie__title a, .product__title a")
-        val title = titleElement?.text() ?: return null
-        val href = titleElement.attr("href") ?: return null
-        
-        val posterUrl = this.selectFirst("img")?.attr("data-src") 
-                        ?: this.selectFirst("img")?.attr("src")
-
-        return newMovieSearchResponse(title, href, TvType.Movie) {
-            this.posterUrl = posterUrl
-        }
-    }
+    // ... (resto del codice per search e load)
 
     override suspend fun search(query: String): List<SearchResponse> {
-        // Il sito usa ?s= per la ricerca
         val url = "$mainUrl/?s=$query&post_type=movie"
-        val document = app.get(url, interceptor = cfInterceptor).document
+        // Applichiamo lo stesso User-Agent anche qui
+        val document = app.get(url, interceptor = cfInterceptor, headers = mapOf("User-Agent" to userAgent)).document
         return document.select("article.masvideos-movie-grid-item, div.product").mapNotNull {
             it.toSearchResult()
         }
     }
-
+}
     override suspend fun load(url: String): LoadResponse {
         val document = app.get(url, interceptor = cfInterceptor).document
         
