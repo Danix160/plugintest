@@ -3,9 +3,9 @@ package com.toonitalia
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
-import com.lagradost.cloudstream3.utils.AppUtils.amap
 import com.lagradost.cloudstream3.MainAPI
 import com.lagradost.cloudstream3.TvType
+import com.lagradost.cloudstream3.ParCollections.parMap
 import org.jsoup.Jsoup
 
 class ToonItaliaProvider : MainAPI() {
@@ -57,20 +57,19 @@ class ToonItaliaProvider : MainAPI() {
         return newHomePageResponse(request.name, items)
     }
 
-    // UTILIZZO DI AMAP: Carica i poster in parallelo senza errori di build
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/?s=$query"
         val document = app.get(url, headers = commonHeaders).document
         
-        val searchResults = document.select("article").mapNotNull { article ->
+        val items = document.select("article").mapNotNull { article ->
             val titleHeader = article.selectFirst("h2.entry-title a") ?: return@mapNotNull null
             val href = titleHeader.attr("href")
             val title = titleHeader.text()
             Pair(title, href)
         }
 
-        // amap esegue le richieste in parallelo (molto veloce)
-        return searchResults.amap { (title, href) ->
+        // parMap è il metodo standard di Cloudstream per fare richieste parallele
+        return items.parMap { (title, href) ->
             val posterUrl = try {
                 val innerDoc = app.get(href, headers = commonHeaders).document
                 val img = innerDoc.selectFirst("div.entry-content img, .post-thumbnail img")
@@ -111,7 +110,6 @@ class ToonItaliaProvider : MainAPI() {
         lines.forEach { line ->
             val docLine = Jsoup.parseBodyFragment(line)
             val text = docLine.text().trim()
-            val isTrailerRow = text.contains(Regex("(?i)sigla|opening|intro|ending|trailer"))
             
             val validLinks = docLine.select("a").filter { a -> 
                 val href = a.attr("href")
@@ -122,6 +120,7 @@ class ToonItaliaProvider : MainAPI() {
             }
 
             if (validLinks.isNotEmpty()) {
+                val isTrailerRow = text.contains(Regex("(?i)sigla|opening|intro|ending|trailer"))
                 val matchSE = Regex("""(\d+)[×x](\d+)""").find(text)
                 val matchSimple = Regex("""^(\d+)""").find(text)
 
