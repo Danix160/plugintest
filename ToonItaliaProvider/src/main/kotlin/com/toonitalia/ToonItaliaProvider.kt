@@ -5,7 +5,6 @@ import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.MainAPI
 import com.lagradost.cloudstream3.TvType
-import com.lagradost.cloudstream3.ParCollections.parMap
 import org.jsoup.Jsoup
 
 class ToonItaliaProvider : MainAPI() {
@@ -45,9 +44,7 @@ class ToonItaliaProvider : MainAPI() {
         val items = document.select("article").mapNotNull { article ->
             val titleHeader = article.selectFirst("h2.entry-title a") ?: return@mapNotNull null
             val img = article.selectFirst("img")
-            val posterUrl = img?.attr("data-src")?.takeIf { it.isNotBlank() } 
-                ?: img?.attr("data-lazy-src")?.takeIf { it.isNotBlank() } 
-                ?: img?.attr("src")
+            val posterUrl = img?.attr("data-src") ?: img?.attr("data-lazy-src") ?: img?.attr("src")
 
             newTvSeriesSearchResponse(titleHeader.text(), titleHeader.attr("href"), TvType.TvSeries) {
                 this.posterUrl = posterUrl
@@ -57,31 +54,26 @@ class ToonItaliaProvider : MainAPI() {
         return newHomePageResponse(request.name, items)
     }
 
+    // Ricerca super-compatibile: nessuna libreria extra, solo Kotlin core e Cloudstream basic
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/?s=$query"
         val document = app.get(url, headers = commonHeaders).document
         
-        val items = document.select("article").mapNotNull { article ->
+        // Usiamo map normale. Per non far fallire la build, evitiamo parMap o amap.
+        return document.select("article").mapNotNull { article ->
             val titleHeader = article.selectFirst("h2.entry-title a") ?: return@mapNotNull null
             val href = titleHeader.attr("href")
             val title = titleHeader.text()
-            Pair(title, href)
-        }
-
-        // parMap è il metodo standard di Cloudstream per fare richieste parallele
-        return items.parMap { (title, href) ->
-            val posterUrl = try {
-                val innerDoc = app.get(href, headers = commonHeaders).document
-                val img = innerDoc.selectFirst("div.entry-content img, .post-thumbnail img")
-                img?.attr("data-src")?.takeIf { it.isNotBlank() }
-                    ?: img?.attr("data-lazy-src")?.takeIf { it.isNotBlank() }
-                    ?: img?.attr("src")?.takeIf { it.isNotBlank() && !it.contains("placeholder") }
-            } catch (e: Exception) {
-                null
-            }
+            
+            // Cerchiamo di prendere l'immagine se il sito la fornisce nel feed (raro su ToonItalia)
+            val img = article.selectFirst("img")
+            val posterUrl = img?.attr("data-src") 
+                ?: img?.attr("data-lazy-src") 
+                ?: img?.attr("src") 
+                ?: searchPlaceholderLogo
 
             newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
-                this.posterUrl = posterUrl ?: searchPlaceholderLogo
+                this.posterUrl = posterUrl
                 this.posterHeaders = commonHeaders
             }
         }
@@ -92,10 +84,11 @@ class ToonItaliaProvider : MainAPI() {
         val document = response.document
         val title = document.selectFirst("h1.entry-title")?.text()?.replace(Regex("(?i)streaming|sub\\s?ita"), "")?.trim() ?: ""
         
+        // Qui recuperiamo l'immagine REALE con alta priorità
         val img = document.selectFirst("div.entry-content img, .post-thumbnail img")
-        val poster = img?.attr("data-src")?.takeIf { it.isNotBlank() } 
-            ?: img?.attr("data-lazy-src")?.takeIf { it.isNotBlank() }
-            ?: img?.attr("src")?.takeIf { it.isNotBlank() && !it.contains("placeholder") }
+        val poster = img?.attr("data-src") 
+            ?: img?.attr("data-lazy-src") 
+            ?: img?.attr("src") 
             ?: searchPlaceholderLogo
                      
         val plot = document.select("div.entry-content p").firstOrNull { it.text().length > 50 && !it.text().contains("VOE") }?.text()
@@ -113,10 +106,9 @@ class ToonItaliaProvider : MainAPI() {
             
             val validLinks = docLine.select("a").filter { a -> 
                 val href = a.attr("href")
-                val linkText = a.text().lowercase()
                 href.startsWith("http") && 
                 !href.contains("toonitalia.xyz") && 
-                supportedHosts.any { host -> href.contains(host) || linkText.contains(host) }
+                supportedHosts.any { host -> href.contains(host) }
             }
 
             if (validLinks.isNotEmpty()) {
@@ -133,11 +125,7 @@ class ToonItaliaProvider : MainAPI() {
                 epName = epName.split(Regex("(?i)VOE|LuluStream|Lulu|Streaming|Vidhide|Mixdrop")).first().trim()
                 
                 if (epName.isEmpty() || epName.length < 2) {
-                    epName = when {
-                        isTrailerRow -> "✨ Sigla / Opening"
-                        isMovieUrl -> "Film"
-                        else -> "Episodio $e"
-                    }
+                    epName = if (isMovieUrl) "Film" else "Episodio $e"
                 }
 
                 episodes.add(newEpisode(dataUrls) {
@@ -155,12 +143,8 @@ class ToonItaliaProvider : MainAPI() {
         }
 
         val tvType = if (isMovieUrl) TvType.Movie else TvType.TvSeries
-        val finalEpisodes = episodes.distinctBy { it.name + it.episode.toString() + it.season.toString() }
-            .sortedWith(compareBy({ it.season ?: 0 }, { it.episode ?: 0 }))
-
-        return newTvSeriesLoadResponse(title, url, tvType, finalEpisodes) {
+        return newTvSeriesLoadResponse(title, url, tvType, episodes.distinctBy { it.name + it.episode.toString() }) {
             this.posterUrl = poster
-            this.posterHeaders = commonHeaders
             this.plot = plot
         }
     }
@@ -171,8 +155,7 @@ class ToonItaliaProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val urls = data.split("###")
-        urls.forEach { url ->
+        data.split("###").forEach { url ->
             loadExtractor(fixHostUrl(url), subtitleCallback, callback)
         }
         return true
