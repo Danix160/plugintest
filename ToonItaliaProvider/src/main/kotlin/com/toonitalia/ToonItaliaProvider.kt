@@ -3,6 +3,7 @@ package com.toonitalia
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
+import com.lagradost.cloudstream3.utils.AppUtils.amap
 import com.lagradost.cloudstream3.MainAPI
 import com.lagradost.cloudstream3.TvType
 import org.jsoup.Jsoup
@@ -56,24 +57,32 @@ class ToonItaliaProvider : MainAPI() {
         return newHomePageResponse(request.name, items)
     }
 
+    // UTILIZZO DI AMAP: Carica i poster in parallelo senza errori di build
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/?s=$query"
         val document = app.get(url, headers = commonHeaders).document
         
-        return document.select("article").mapNotNull { article ->
+        val searchResults = document.select("article").mapNotNull { article ->
             val titleHeader = article.selectFirst("h2.entry-title a") ?: return@mapNotNull null
             val href = titleHeader.attr("href")
             val title = titleHeader.text()
-                .replace(Regex("(?i)streaming|sub\\s?ita|serie\\s?tv|film"), "")
-                .trim()
+            Pair(title, href)
+        }
 
-            // Genera un'immagine poster tramite DuckDuckGo/Bing Proxy
-            // Aggiungiamo "poster" alla query per ottenere locandine verticali
-            val encodedTitle = title.replace(" ", "+")
-            val externalPoster = "https://external-content.duckduckgo.com/iu/?u=https://tse1.mm.bing.net/th?q=$encodedTitle+poster+movie&w=300&h=450&c=7"
+        // amap esegue le richieste in parallelo (molto veloce)
+        return searchResults.amap { (title, href) ->
+            val posterUrl = try {
+                val innerDoc = app.get(href, headers = commonHeaders).document
+                val img = innerDoc.selectFirst("div.entry-content img, .post-thumbnail img")
+                img?.attr("data-src")?.takeIf { it.isNotBlank() }
+                    ?: img?.attr("data-lazy-src")?.takeIf { it.isNotBlank() }
+                    ?: img?.attr("src")?.takeIf { it.isNotBlank() && !it.contains("placeholder") }
+            } catch (e: Exception) {
+                null
+            }
 
-            newTvSeriesSearchResponse(titleHeader.text(), href, TvType.TvSeries) {
-                this.posterUrl = externalPoster
+            newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
+                this.posterUrl = posterUrl ?: searchPlaceholderLogo
                 this.posterHeaders = commonHeaders
             }
         }
