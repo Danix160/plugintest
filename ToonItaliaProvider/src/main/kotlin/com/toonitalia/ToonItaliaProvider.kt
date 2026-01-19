@@ -21,7 +21,6 @@ class ToonItaliaProvider : MainAPI() {
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     )
 
-    // Lista degli host video supportati per evitare di prendere link a pagine web casuali
     private val supportedHosts = listOf(
         "voe", "chuckle-tube", "luluvdo", "lulustream", "vidhide", 
         "mixdrop", "streamtape", "fastream", "filemoon", "wolfstream", "streamwish"
@@ -59,7 +58,7 @@ class ToonItaliaProvider : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/?s=$query"
-        val document = app.get(url, headers = commonHeaders, timeout = 30).document
+        val document = app.get(url, headers = commonHeaders).document
         return document.select("article").mapNotNull { article ->
             val titleHeader = article.selectFirst("h2.entry-title a") ?: return@mapNotNull null
             newTvSeriesSearchResponse(titleHeader.text(), titleHeader.attr("href"), TvType.TvSeries) {
@@ -79,24 +78,27 @@ class ToonItaliaProvider : MainAPI() {
             ?: img?.attr("data-lazy-src")?.takeIf { it.isNotBlank() }
             ?: img?.attr("src")?.takeIf { it.isNotBlank() && !it.contains("placeholder") }
             ?: searchPlaceholderLogo
-                     
-        val plot = document.select("div.entry-content p").firstOrNull { it.text().length > 50 && !it.text().contains("VOE") }?.text()
+
+        // --- ESTRAZIONE TRAMA, DURATA E ANNO ---
+        val entryContent = document.selectFirst("div.entry-content")
+        val fullText = entryContent?.text() ?: ""
+
+        val plot = document.select("div.entry-content p")
+            .map { it.text() }
+            .firstOrNull { it.length > 60 && !it.contains(Regex("(?i)VOE|Lulu|Vidhide|Mixdrop|Streamtape")) }
+
+        val duration = Regex("""(\d+)\s?min""").find(fullText)?.groupValues?.get(1)?.toIntOrNull()
+        val year = Regex("""\b(19\d{2}|20[0-2]\d)\b""").find(fullText)?.groupValues?.get(1)?.toIntOrNull()
 
         val episodes = mutableListOf<Episode>()
-        val entryContent = document.selectFirst("div.entry-content")
         val isMovieUrl = url.contains("film") || url.contains("film-animazione")
         
-        // Dividiamo per tag di riga per analizzare ogni episodio singolarmente
         val lines = entryContent?.html()?.split(Regex("<br\\s*/?>|</p>|</div>|<li>|\\n")) ?: listOf()
         var autoEpCounter = 1
 
         lines.forEach { line ->
             val docLine = Jsoup.parseBodyFragment(line)
             val text = docLine.text().trim()
-            
-            val isTrailerRow = text.contains(Regex("(?i)sigla|opening|intro|ending|trailer"))
-            
-            // Filtro rigoroso: URL deve essere un host video e NON un link interno a ToonItalia
             val validLinks = docLine.select("a").filter { a -> 
                 val href = a.attr("href")
                 val linkText = a.text().lowercase()
@@ -106,25 +108,19 @@ class ToonItaliaProvider : MainAPI() {
             }
 
             if (validLinks.isNotEmpty()) {
+                val isTrailerRow = text.contains(Regex("(?i)sigla|opening|intro|ending|trailer"))
                 val matchSE = Regex("""(\d+)[×x](\d+)""").find(text)
                 val matchSimple = Regex("""^(\d+)""").find(text)
 
                 val s = if (isTrailerRow) 0 else if (isMovieUrl) null else (matchSE?.groupValues?.get(1)?.toIntOrNull() ?: 1)
                 val e = if (isTrailerRow) 0 else if (isMovieUrl) null else (matchSE?.groupValues?.get(2)?.toIntOrNull() ?: matchSimple?.groupValues?.get(1)?.toIntOrNull() ?: autoEpCounter)
 
-                // Uniamo i link della stessa riga (es. VOE e LuluStream) separati da ###
                 val dataUrls = validLinks.map { it.attr("href") }.joinToString("###")
-                
-                // Pulizia del nome episodio dal testo della riga
                 var epName = text.replace(Regex("""^\d+[×x]\d+|^\d+"""), "").replace("–", "").trim()
                 epName = epName.split(Regex("(?i)VOE|LuluStream|Lulu|Streaming|Vidhide|Mixdrop")).first().trim()
                 
                 if (epName.isEmpty() || epName.length < 2) {
-                    epName = when {
-                        isTrailerRow -> "✨ Sigla / Opening"
-                        isMovieUrl -> "Film"
-                        else -> "Episodio $e"
-                    }
+                    epName = if (isMovieUrl) "Film" else "Episodio $e"
                 }
 
                 episodes.add(newEpisode(dataUrls) {
@@ -145,10 +141,22 @@ class ToonItaliaProvider : MainAPI() {
         val finalEpisodes = episodes.distinctBy { it.name + it.episode.toString() + it.season.toString() }
             .sortedWith(compareBy({ it.season ?: 0 }, { it.episode ?: 0 }))
 
-        return newTvSeriesLoadResponse(title, url, tvType, finalEpisodes) {
-            this.posterUrl = poster
-            this.posterHeaders = commonHeaders
-            this.plot = plot
+        return if (tvType == TvType.Movie) {
+            newMovieLoadResponse(title, url, TvType.Movie, finalEpisodes.firstOrNull()?.data ?: "") {
+                this.posterUrl = poster
+                this.plot = plot
+                this.year = year
+                this.duration = duration
+                this.posterHeaders = commonHeaders
+            }
+        } else {
+            newTvSeriesLoadResponse(title, url, tvType, finalEpisodes) {
+                this.posterUrl = poster
+                this.plot = plot
+                this.year = year
+                this.duration = duration
+                this.posterHeaders = commonHeaders
+            }
         }
     }
 
@@ -158,9 +166,7 @@ class ToonItaliaProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val urls = data.split("###")
-        urls.forEach { url ->
-            // fixHostUrl converte i domini custom di ToonItalia in quelli standard per gli estrattori
+        data.split("###").forEach { url ->
             loadExtractor(fixHostUrl(url), subtitleCallback, callback)
         }
         return true
