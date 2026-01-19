@@ -56,28 +56,24 @@ class ToonItaliaProvider : MainAPI() {
         return newHomePageResponse(request.name, items)
     }
 
-    // NUOVA LOGICA: Entra in ogni articolo per prendere il poster reale
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/?s=$query"
         val document = app.get(url, headers = commonHeaders).document
         
-        // Prendiamo i primi 12 risultati per non rendere la ricerca troppo lenta
-        return document.select("article").take(12).mapNotNull { article ->
+        return document.select("article").mapNotNull { article ->
             val titleHeader = article.selectFirst("h2.entry-title a") ?: return@mapNotNull null
             val href = titleHeader.attr("href")
             val title = titleHeader.text()
+                .replace(Regex("(?i)streaming|sub\\s?ita|serie\\s?tv|film"), "")
+                .trim()
 
-            // Carichiamo la pagina dell'articolo per trovare l'immagine vera
-            val innerDoc = app.get(href, headers = commonHeaders).document
-            val img = innerDoc.selectFirst("div.entry-content img, .post-thumbnail img")
-            
-            val posterUrl = img?.attr("data-src")?.takeIf { it.isNotBlank() }
-                ?: img?.attr("data-lazy-src")?.takeIf { it.isNotBlank() }
-                ?: img?.attr("src")?.takeIf { it.isNotBlank() && !it.contains("placeholder") }
-                ?: searchPlaceholderLogo
+            // Genera un'immagine poster tramite DuckDuckGo/Bing Proxy
+            // Aggiungiamo "poster" alla query per ottenere locandine verticali
+            val encodedTitle = title.replace(" ", "+")
+            val externalPoster = "https://external-content.duckduckgo.com/iu/?u=https://tse1.mm.bing.net/th?q=$encodedTitle+poster+movie&w=300&h=450&c=7"
 
-            newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
-                this.posterUrl = posterUrl
+            newTvSeriesSearchResponse(titleHeader.text(), href, TvType.TvSeries) {
+                this.posterUrl = externalPoster
                 this.posterHeaders = commonHeaders
             }
         }
