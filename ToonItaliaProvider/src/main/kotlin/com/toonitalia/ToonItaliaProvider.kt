@@ -21,6 +21,7 @@ class ToonItaliaProvider : MainAPI() {
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     )
 
+    // Lista degli host video supportati per evitare di prendere link a pagine web casuali
     private val supportedHosts = listOf(
         "voe", "chuckle-tube", "luluvdo", "lulustream", "vidhide", 
         "mixdrop", "streamtape", "fastream", "filemoon", "wolfstream", "streamwish"
@@ -44,7 +45,9 @@ class ToonItaliaProvider : MainAPI() {
         val items = document.select("article").mapNotNull { article ->
             val titleHeader = article.selectFirst("h2.entry-title a") ?: return@mapNotNull null
             val img = article.selectFirst("img")
-            val posterUrl = img?.attr("data-src") ?: img?.attr("data-lazy-src") ?: img?.attr("src")
+            val posterUrl = img?.attr("data-src")?.takeIf { it.isNotBlank() } 
+                ?: img?.attr("data-lazy-src")?.takeIf { it.isNotBlank() } 
+                ?: img?.attr("src")
 
             newTvSeriesSearchResponse(titleHeader.text(), titleHeader.attr("href"), TvType.TvSeries) {
                 this.posterUrl = posterUrl
@@ -54,26 +57,13 @@ class ToonItaliaProvider : MainAPI() {
         return newHomePageResponse(request.name, items)
     }
 
-    // Ricerca super-compatibile: nessuna libreria extra, solo Kotlin core e Cloudstream basic
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/?s=$query"
-        val document = app.get(url, headers = commonHeaders).document
-        
-        // Usiamo map normale. Per non far fallire la build, evitiamo parMap o amap.
+        val document = app.get(url, headers = commonHeaders, timeout = 30).document
         return document.select("article").mapNotNull { article ->
             val titleHeader = article.selectFirst("h2.entry-title a") ?: return@mapNotNull null
-            val href = titleHeader.attr("href")
-            val title = titleHeader.text()
-            
-            // Cerchiamo di prendere l'immagine se il sito la fornisce nel feed (raro su ToonItalia)
-            val img = article.selectFirst("img")
-            val posterUrl = img?.attr("data-src") 
-                ?: img?.attr("data-lazy-src") 
-                ?: img?.attr("src") 
-                ?: searchPlaceholderLogo
-
-            newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
-                this.posterUrl = posterUrl
+            newTvSeriesSearchResponse(titleHeader.text(), titleHeader.attr("href"), TvType.TvSeries) {
+                this.posterUrl = searchPlaceholderLogo
                 this.posterHeaders = commonHeaders
             }
         }
@@ -84,11 +74,10 @@ class ToonItaliaProvider : MainAPI() {
         val document = response.document
         val title = document.selectFirst("h1.entry-title")?.text()?.replace(Regex("(?i)streaming|sub\\s?ita"), "")?.trim() ?: ""
         
-        // Qui recuperiamo l'immagine REALE con alta priorità
         val img = document.selectFirst("div.entry-content img, .post-thumbnail img")
-        val poster = img?.attr("data-src") 
-            ?: img?.attr("data-lazy-src") 
-            ?: img?.attr("src") 
+        val poster = img?.attr("data-src")?.takeIf { it.isNotBlank() } 
+            ?: img?.attr("data-lazy-src")?.takeIf { it.isNotBlank() }
+            ?: img?.attr("src")?.takeIf { it.isNotBlank() && !it.contains("placeholder") }
             ?: searchPlaceholderLogo
                      
         val plot = document.select("div.entry-content p").firstOrNull { it.text().length > 50 && !it.text().contains("VOE") }?.text()
@@ -97,6 +86,7 @@ class ToonItaliaProvider : MainAPI() {
         val entryContent = document.selectFirst("div.entry-content")
         val isMovieUrl = url.contains("film") || url.contains("film-animazione")
         
+        // Dividiamo per tag di riga per analizzare ogni episodio singolarmente
         val lines = entryContent?.html()?.split(Regex("<br\\s*/?>|</p>|</div>|<li>|\\n")) ?: listOf()
         var autoEpCounter = 1
 
@@ -104,28 +94,37 @@ class ToonItaliaProvider : MainAPI() {
             val docLine = Jsoup.parseBodyFragment(line)
             val text = docLine.text().trim()
             
+            val isTrailerRow = text.contains(Regex("(?i)sigla|opening|intro|ending|trailer"))
+            
+            // Filtro rigoroso: URL deve essere un host video e NON un link interno a ToonItalia
             val validLinks = docLine.select("a").filter { a -> 
                 val href = a.attr("href")
+                val linkText = a.text().lowercase()
                 href.startsWith("http") && 
                 !href.contains("toonitalia.xyz") && 
-                supportedHosts.any { host -> href.contains(host) }
+                supportedHosts.any { host -> href.contains(host) || linkText.contains(host) }
             }
 
             if (validLinks.isNotEmpty()) {
-                val isTrailerRow = text.contains(Regex("(?i)sigla|opening|intro|ending|trailer"))
                 val matchSE = Regex("""(\d+)[×x](\d+)""").find(text)
                 val matchSimple = Regex("""^(\d+)""").find(text)
 
                 val s = if (isTrailerRow) 0 else if (isMovieUrl) null else (matchSE?.groupValues?.get(1)?.toIntOrNull() ?: 1)
                 val e = if (isTrailerRow) 0 else if (isMovieUrl) null else (matchSE?.groupValues?.get(2)?.toIntOrNull() ?: matchSimple?.groupValues?.get(1)?.toIntOrNull() ?: autoEpCounter)
 
+                // Uniamo i link della stessa riga (es. VOE e LuluStream) separati da ###
                 val dataUrls = validLinks.map { it.attr("href") }.joinToString("###")
                 
+                // Pulizia del nome episodio dal testo della riga
                 var epName = text.replace(Regex("""^\d+[×x]\d+|^\d+"""), "").replace("–", "").trim()
                 epName = epName.split(Regex("(?i)VOE|LuluStream|Lulu|Streaming|Vidhide|Mixdrop")).first().trim()
                 
                 if (epName.isEmpty() || epName.length < 2) {
-                    epName = if (isMovieUrl) "Film" else "Episodio $e"
+                    epName = when {
+                        isTrailerRow -> "✨ Sigla / Opening"
+                        isMovieUrl -> "Film"
+                        else -> "Episodio $e"
+                    }
                 }
 
                 episodes.add(newEpisode(dataUrls) {
@@ -143,8 +142,12 @@ class ToonItaliaProvider : MainAPI() {
         }
 
         val tvType = if (isMovieUrl) TvType.Movie else TvType.TvSeries
-        return newTvSeriesLoadResponse(title, url, tvType, episodes.distinctBy { it.name + it.episode.toString() }) {
+        val finalEpisodes = episodes.distinctBy { it.name + it.episode.toString() + it.season.toString() }
+            .sortedWith(compareBy({ it.season ?: 0 }, { it.episode ?: 0 }))
+
+        return newTvSeriesLoadResponse(title, url, tvType, finalEpisodes) {
             this.posterUrl = poster
+            this.posterHeaders = commonHeaders
             this.plot = plot
         }
     }
@@ -155,7 +158,9 @@ class ToonItaliaProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        data.split("###").forEach { url ->
+        val urls = data.split("###")
+        urls.forEach { url ->
+            // fixHostUrl converte i domini custom di ToonItalia in quelli standard per gli estrattori
             loadExtractor(fixHostUrl(url), subtitleCallback, callback)
         }
         return true
