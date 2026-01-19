@@ -6,9 +6,6 @@ import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.MainAPI
 import com.lagradost.cloudstream3.TvType
 import org.jsoup.Jsoup
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 
 class ToonItaliaProvider : MainAPI() {
     override var mainUrl = "https://toonitalia.xyz"
@@ -59,38 +56,29 @@ class ToonItaliaProvider : MainAPI() {
         return newHomePageResponse(request.name, items)
     }
 
-    // Risoluzione del problema immagini mancanti nella ricerca
-    override suspend fun search(query: String): List<SearchResponse> = coroutineScope {
+    // Ricerca corretta senza dipendenze esterne kotlinx
+    override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/?s=$query"
         val document = app.get(url, headers = commonHeaders).document
         
-        val searchResults = document.select("article").mapNotNull { article ->
+        return document.select("article").mapNotNull { article ->
             val titleHeader = article.selectFirst("h2.entry-title a") ?: return@mapNotNull null
             val href = titleHeader.attr("href")
             val title = titleHeader.text()
-            Pair(title, href)
-        }
+            
+            // Proviamo a prendere l'immagine dall'anteprima se presente, 
+            // altrimenti usiamo il placeholder (per non rallentare troppo senza async)
+            val img = article.selectFirst("img")
+            val posterUrl = img?.attr("data-src")?.takeIf { it.isNotBlank() } 
+                ?: img?.attr("data-lazy-src")?.takeIf { it.isNotBlank() } 
+                ?: img?.attr("src") 
+                ?: searchPlaceholderLogo
 
-        // Per ogni risultato senza immagine, facciamo una micro-richiesta per prendere il poster reale
-        searchResults.map { (title, href) ->
-            async {
-                val posterUrl = try {
-                    val innerDoc = app.get(href, headers = commonHeaders).document
-                    // Cerchiamo la prima immagine utile nell'articolo
-                    val img = innerDoc.selectFirst("div.entry-content img, .post-thumbnail img")
-                    img?.attr("data-src")?.takeIf { it.isNotBlank() }
-                        ?: img?.attr("data-lazy-src")?.takeIf { it.isNotBlank() }
-                        ?: img?.attr("src")
-                } catch (e: Exception) {
-                    null
-                }
-
-                newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
-                    this.posterUrl = posterUrl ?: searchPlaceholderLogo
-                    this.posterHeaders = commonHeaders
-                }
+            newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
+                this.posterUrl = posterUrl
+                this.posterHeaders = commonHeaders
             }
-        }.awaitAll()
+        }
     }
 
     override suspend fun load(url: String): LoadResponse {
