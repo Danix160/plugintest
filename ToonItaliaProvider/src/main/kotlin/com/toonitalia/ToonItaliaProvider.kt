@@ -6,6 +6,9 @@ import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.MainAPI
 import com.lagradost.cloudstream3.TvType
 import org.jsoup.Jsoup
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 
 class ToonItaliaProvider : MainAPI() {
     override var mainUrl = "https://toonitalia.xyz"
@@ -21,7 +24,6 @@ class ToonItaliaProvider : MainAPI() {
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     )
 
-    // Lista degli host video supportati per evitare di prendere link a pagine web casuali
     private val supportedHosts = listOf(
         "voe", "chuckle-tube", "luluvdo", "lulustream", "vidhide", 
         "mixdrop", "streamtape", "fastream", "filemoon", "wolfstream", "streamwish"
@@ -57,16 +59,38 @@ class ToonItaliaProvider : MainAPI() {
         return newHomePageResponse(request.name, items)
     }
 
-    override suspend fun search(query: String): List<SearchResponse> {
+    // Risoluzione del problema immagini mancanti nella ricerca
+    override suspend fun search(query: String): List<SearchResponse> = coroutineScope {
         val url = "$mainUrl/?s=$query"
-        val document = app.get(url, headers = commonHeaders, timeout = 30).document
-        return document.select("article").mapNotNull { article ->
+        val document = app.get(url, headers = commonHeaders).document
+        
+        val searchResults = document.select("article").mapNotNull { article ->
             val titleHeader = article.selectFirst("h2.entry-title a") ?: return@mapNotNull null
-            newTvSeriesSearchResponse(titleHeader.text(), titleHeader.attr("href"), TvType.TvSeries) {
-                this.posterUrl = searchPlaceholderLogo
-                this.posterHeaders = commonHeaders
-            }
+            val href = titleHeader.attr("href")
+            val title = titleHeader.text()
+            Pair(title, href)
         }
+
+        // Per ogni risultato senza immagine, facciamo una micro-richiesta per prendere il poster reale
+        searchResults.map { (title, href) ->
+            async {
+                val posterUrl = try {
+                    val innerDoc = app.get(href, headers = commonHeaders).document
+                    // Cerchiamo la prima immagine utile nell'articolo
+                    val img = innerDoc.selectFirst("div.entry-content img, .post-thumbnail img")
+                    img?.attr("data-src")?.takeIf { it.isNotBlank() }
+                        ?: img?.attr("data-lazy-src")?.takeIf { it.isNotBlank() }
+                        ?: img?.attr("src")
+                } catch (e: Exception) {
+                    null
+                }
+
+                newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
+                    this.posterUrl = posterUrl ?: searchPlaceholderLogo
+                    this.posterHeaders = commonHeaders
+                }
+            }
+        }.awaitAll()
     }
 
     override suspend fun load(url: String): LoadResponse {
@@ -86,17 +110,14 @@ class ToonItaliaProvider : MainAPI() {
         val entryContent = document.selectFirst("div.entry-content")
         val isMovieUrl = url.contains("film") || url.contains("film-animazione")
         
-        // Dividiamo per tag di riga per analizzare ogni episodio singolarmente
         val lines = entryContent?.html()?.split(Regex("<br\\s*/?>|</p>|</div>|<li>|\\n")) ?: listOf()
         var autoEpCounter = 1
 
         lines.forEach { line ->
             val docLine = Jsoup.parseBodyFragment(line)
             val text = docLine.text().trim()
-            
             val isTrailerRow = text.contains(Regex("(?i)sigla|opening|intro|ending|trailer"))
             
-            // Filtro rigoroso: URL deve essere un host video e NON un link interno a ToonItalia
             val validLinks = docLine.select("a").filter { a -> 
                 val href = a.attr("href")
                 val linkText = a.text().lowercase()
@@ -112,10 +133,8 @@ class ToonItaliaProvider : MainAPI() {
                 val s = if (isTrailerRow) 0 else if (isMovieUrl) null else (matchSE?.groupValues?.get(1)?.toIntOrNull() ?: 1)
                 val e = if (isTrailerRow) 0 else if (isMovieUrl) null else (matchSE?.groupValues?.get(2)?.toIntOrNull() ?: matchSimple?.groupValues?.get(1)?.toIntOrNull() ?: autoEpCounter)
 
-                // Uniamo i link della stessa riga (es. VOE e LuluStream) separati da ###
                 val dataUrls = validLinks.map { it.attr("href") }.joinToString("###")
                 
-                // Pulizia del nome episodio dal testo della riga
                 var epName = text.replace(Regex("""^\d+[×x]\d+|^\d+"""), "").replace("–", "").trim()
                 epName = epName.split(Regex("(?i)VOE|LuluStream|Lulu|Streaming|Vidhide|Mixdrop")).first().trim()
                 
@@ -160,7 +179,6 @@ class ToonItaliaProvider : MainAPI() {
     ): Boolean {
         val urls = data.split("###")
         urls.forEach { url ->
-            // fixHostUrl converte i domini custom di ToonItalia in quelli standard per gli estrattori
             loadExtractor(fixHostUrl(url), subtitleCallback, callback)
         }
         return true
