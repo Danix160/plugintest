@@ -1,86 +1,5 @@
 [
     {
-        "iconUrl": "https://cb01uno.uno/wp-content/uploads/2025/02/logo-cb01-it-com-film-streaming.png",
-        "apiVersion": 1,
-        "repositoryUrl": "https://github.com/Danix160/plugintest",
-        "fileSize": 11234,
-        "status": 1,
-        "language": "it",
-        "authors": [
-            "Danix"
-        ],
-        "tvTypes": [
-            "Movie",
-            "TvSeries"
-        ],
-        "version": 5,
-        "internalName": "CBProvider",
-        "description": "CB001.uno",
-        "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/CBProvider.cs3",
-        "name": "CBProvider"
-    },
-    {
-        "iconUrl": "https://filmez.org/wp-content/uploads/2022/11/cropped-logo_filmez2.jpg",
-        "apiVersion": 1,
-        "repositoryUrl": "https://github.com/Danix160/plugintest",
-        "fileSize": 10287,
-        "status": 1,
-        "language": "it",
-        "authors": [
-            "Danix"
-        ],
-        "tvTypes": [
-            "Movie"
-        ],
-        "version": 4,
-        "internalName": "FilmezProvider",
-        "description": "Archivio di Film del sito Filmez.org",
-        "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/FilmezProvider.cs3",
-        "name": "FilmezProvider"
-    },
-    {
-        "iconUrl": "https://guardaplay.bar/wp-content/uploads/2025/12/cropped-guardaplaym.png",
-        "apiVersion": 1,
-        "repositoryUrl": "https://github.com/Danix160/plugintest",
-        "fileSize": 8980,
-        "status": 1,
-        "language": "it",
-        "authors": [
-            "Danix"
-        ],
-        "tvTypes": [
-            "Movie",
-            "TvSeries"
-        ],
-        "version": 1,
-        "internalName": "GuardaPlayProvider",
-        "description": "Film di Guardaplay",
-        "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/GuardaPlayProvider.cs3",
-        "name": "GuardaPlayProvider"
-    },
-    {
-        "iconUrl": "https://onlineserietv.com/images/logo.svg",
-        "apiVersion": 1,
-        "repositoryUrl": "https://github.com/Danix160/plugintest",
-        "fileSize": 12104,
-        "status": 0,
-        "language": "it",
-        "authors": [
-            "Danix"
-        ],
-        "tvTypes": [
-            "Movie",
-            "TvSeries",
-            "Anime",
-            "Cartoon"
-        ],
-        "version": 1,
-        "internalName": "OnlineserieProvider",
-        "description": "Sito Streaming",
-        "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/OnlineserieProvider.cs3",
-        "name": "OnlineserieProvider"
-    },
-    {
         "iconUrl": "https://toonitalia.xyz/wp-content/uploads/2023/08/cropped-Majintoon-192x192.jpg",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/Danix160/plugintest",
@@ -95,7 +14,7 @@
             "Anime",
             "Cartoon"
         ],
-        "version": 21,
+        "version": 23,
         "internalName": "ToonItaliaProvider",
         "description": "Archivio di Anime e Cartoni animati in italiano da ToonItalia.xyz",
         "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/ToonItaliaProvider.cs3",
