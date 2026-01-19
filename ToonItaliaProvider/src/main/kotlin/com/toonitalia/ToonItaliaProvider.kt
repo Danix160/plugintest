@@ -21,6 +21,12 @@ class ToonItaliaProvider : MainAPI() {
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     )
 
+    // Lista degli host video supportati per evitare di prendere link a pagine web casuali
+    private val supportedHosts = listOf(
+        "voe", "chuckle-tube", "luluvdo", "lulustream", "vidhide", 
+        "mixdrop", "streamtape", "fastream", "filemoon", "wolfstream", "streamwish"
+    )
+
     override val mainPage = mainPageOf(
         "$mainUrl/category/anime" to "Anime",
         "$mainUrl/category/film-animazione/" to "Film Animazione",
@@ -80,6 +86,7 @@ class ToonItaliaProvider : MainAPI() {
         val entryContent = document.selectFirst("div.entry-content")
         val isMovieUrl = url.contains("film") || url.contains("film-animazione")
         
+        // Dividiamo per tag di riga per analizzare ogni episodio singolarmente
         val lines = entryContent?.html()?.split(Regex("<br\\s*/?>|</p>|</div>|<li>|\\n")) ?: listOf()
         var autoEpCounter = 1
 
@@ -87,31 +94,32 @@ class ToonItaliaProvider : MainAPI() {
             val docLine = Jsoup.parseBodyFragment(line)
             val text = docLine.text().trim()
             
-            // Verifichiamo se è una sigla/opening
             val isTrailerRow = text.contains(Regex("(?i)sigla|opening|intro|ending|trailer"))
             
+            // Filtro rigoroso: URL deve essere un host video e NON un link interno a ToonItalia
             val validLinks = docLine.select("a").filter { a -> 
                 val href = a.attr("href")
-                href.contains("http") && 
-                !href.contains("wikipedia.org") && 
-                !href.contains("animeclick.it") &&
-                !href.contains(Regex("jpg|png|jpeg"))
+                val linkText = a.text().lowercase()
+                href.startsWith("http") && 
+                !href.contains("toonitalia.xyz") && 
+                supportedHosts.any { host -> href.contains(host) || linkText.contains(host) }
             }
 
             if (validLinks.isNotEmpty()) {
                 val matchSE = Regex("""(\d+)[×x](\d+)""").find(text)
                 val matchSimple = Regex("""^(\d+)""").find(text)
 
-                // Usiamo Stagione 0 per le sigle per metterle in cima ed evitare errori di riferimento
                 val s = if (isTrailerRow) 0 else if (isMovieUrl) null else (matchSE?.groupValues?.get(1)?.toIntOrNull() ?: 1)
                 val e = if (isTrailerRow) 0 else if (isMovieUrl) null else (matchSE?.groupValues?.get(2)?.toIntOrNull() ?: matchSimple?.groupValues?.get(1)?.toIntOrNull() ?: autoEpCounter)
 
+                // Uniamo i link della stessa riga (es. VOE e LuluStream) separati da ###
                 val dataUrls = validLinks.map { it.attr("href") }.joinToString("###")
                 
+                // Pulizia del nome episodio dal testo della riga
                 var epName = text.replace(Regex("""^\d+[×x]\d+|^\d+"""), "").replace("–", "").trim()
-                epName = epName.split("VOE", "LuluStream", "Lulu", "Streaming", ignoreCase = true).first().trim()
+                epName = epName.split(Regex("(?i)VOE|LuluStream|Lulu|Streaming|Vidhide|Mixdrop")).first().trim()
                 
-                if (epName.isEmpty()) {
+                if (epName.isEmpty() || epName.length < 2) {
                     epName = when {
                         isTrailerRow -> "✨ Sigla / Opening"
                         isMovieUrl -> "Film"
@@ -134,7 +142,7 @@ class ToonItaliaProvider : MainAPI() {
         }
 
         val tvType = if (isMovieUrl) TvType.Movie else TvType.TvSeries
-        val finalEpisodes = episodes.distinctBy { it.name + it.episode.toString() }
+        val finalEpisodes = episodes.distinctBy { it.name + it.episode.toString() + it.season.toString() }
             .sortedWith(compareBy({ it.season ?: 0 }, { it.episode ?: 0 }))
 
         return newTvSeriesLoadResponse(title, url, tvType, finalEpisodes) {
@@ -152,6 +160,7 @@ class ToonItaliaProvider : MainAPI() {
     ): Boolean {
         val urls = data.split("###")
         urls.forEach { url ->
+            // fixHostUrl converte i domini custom di ToonItalia in quelli standard per gli estrattori
             loadExtractor(fixHostUrl(url), subtitleCallback, callback)
         }
         return true
