@@ -24,49 +24,59 @@ class OnlineSerieTVProvider : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val url = if (page <= 1) request.data else "${request.data}page/$page/"
-        val res = app.get(url, headers = botHeaders)
-        val document = res.document
+    val url = if (page <= 1) request.data else "${request.data}page/$page/"
+    val res = app.get(url, headers = botHeaders)
+    val document = res.document
+    
+    // Cambiato il selettore per trovare correttamente i contenitori
+    val items = document.select("div.items .item, article.item").mapNotNull { element ->
+        // Il titolo ora è direttamente in h3 a dentro l'elemento
+        val titleElement = element.selectFirst("h3 a") ?: return@mapNotNull null
+        val title = titleElement.text().trim()
+        val href = titleElement.attr("href") ?: ""
         
-        val items = document.select(".items .item").mapNotNull { element ->
-            val titleElement = element.selectFirst(".data h3 a") ?: return@mapNotNull null
-            val title = titleElement.text().trim()
-            val href = titleElement.attr("href") ?: ""
-            
-            val img = element.selectFirst(".poster img")
-            val poster = img?.attr("data-src")?.takeIf { it.isNotBlank() } 
-                         ?: img?.attr("src") 
-                         ?: ""
+        val img = element.selectFirst(".poster img")
+        // Il sito ora usa spesso 'src' direttamente o 'data-src' per il lazy load
+        val poster = img?.attr("data-src")?.takeIf { it.isNotBlank() } 
+                     ?: img?.attr("src") 
+                     ?: ""
 
-            val isSeries = href.contains("/serie-tv/") || element.selectFirst(".tvshow") != null
+        // Controllo migliorato per distinguere Serie TV da Film
+        val isSeries = href.contains("/serietv/") || href.contains("/serie-tv/")
 
-            newMovieSearchResponse(title, fixUrl(href), if (isSeries) TvType.TvSeries else TvType.Movie) {
-                this.posterUrl = fixUrl(poster)
-            }
+        newMovieSearchResponse(title, fixUrl(href), if (isSeries) TvType.TvSeries else TvType.Movie) {
+            this.posterUrl = fixUrl(poster)
         }
-        
-        return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
     }
+    
+    return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
+}
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val url = "$mainUrl/?s=$query"
-        val res = app.get(url, headers = botHeaders)
-        val document = res.document
+    // Il nuovo URL di ricerca è strutturato diversamente nel nuovo dominio
+    val url = "$mainUrl/search/$query/" 
+    val res = app.get(url, headers = botHeaders)
+    val document = res.document
+    
+    // Sostituito .result-item con .items .item
+    return document.select(".items .item").mapNotNull { element ->
+        val titleElement = element.selectFirst("h3 a") ?: return@mapNotNull null
+        val title = titleElement.text().trim()
+        val href = titleElement.attr("href") ?: ""
         
-        return document.select(".result-item").mapNotNull { element ->
-            val titleElement = element.selectFirst(".title a") ?: return@mapNotNull null
-            val title = titleElement.text().trim()
-            val href = titleElement.attr("href") ?: ""
-            val poster = element.selectFirst("img")?.attr("src") ?: ""
-            
-            val typeText = element.selectFirst(".type span")?.text() ?: ""
-            val isSeries = typeText.contains("Serie", ignoreCase = true)
+        val img = element.selectFirst(".poster img")
+        val poster = img?.attr("data-src")?.takeIf { it.isNotBlank() } 
+                     ?: img?.attr("src") 
+                     ?: ""
+        
+        // Verifica del tipo basata sul link (più affidabile della vecchia label 'type')
+        val isSeries = href.contains("/serietv/") || href.contains("/serie-tv/")
 
-            newMovieSearchResponse(title, fixUrl(href), if (isSeries) TvType.TvSeries else TvType.Movie) {
-                this.posterUrl = fixUrl(poster)
-            }
+        newMovieSearchResponse(title, fixUrl(href), if (isSeries) TvType.TvSeries else TvType.Movie) {
+            this.posterUrl = fixUrl(poster)
         }
     }
+}
 
     override suspend fun load(url: String): LoadResponse {
         val res = app.get(url, headers = botHeaders)
