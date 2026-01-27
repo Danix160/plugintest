@@ -52,24 +52,24 @@ class OnlineSerieTVProvider : MainAPI() {
     return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
 }
 
-    override suspend fun search(query: String): List<SearchResponse> {
-    // Il nuovo URL di ricerca è strutturato diversamente nel nuovo dominio
+   override suspend fun search(query: String): List<SearchResponse> {
+    // 1. Usa il nuovo endpoint di ricerca del sito .online
     val url = "$mainUrl/search/$query/" 
     val res = app.get(url, headers = botHeaders)
     val document = res.document
     
-    // Sostituito .result-item con .items .item
+    // 2. Assicurati di NON avere TODO() qui sotto
     return document.select(".items .item").mapNotNull { element ->
         val titleElement = element.selectFirst("h3 a") ?: return@mapNotNull null
         val title = titleElement.text().trim()
         val href = titleElement.attr("href") ?: ""
         
         val img = element.selectFirst(".poster img")
+        // Risolve l'errore 404: prendiamo l'URL corretto dell'immagine
         val poster = img?.attr("data-src")?.takeIf { it.isNotBlank() } 
                      ?: img?.attr("src") 
                      ?: ""
         
-        // Verifica del tipo basata sul link (più affidabile della vecchia label 'type')
         val isSeries = href.contains("/serietv/") || href.contains("/serie-tv/")
 
         newMovieSearchResponse(title, fixUrl(href), if (isSeries) TvType.TvSeries else TvType.Movie) {
