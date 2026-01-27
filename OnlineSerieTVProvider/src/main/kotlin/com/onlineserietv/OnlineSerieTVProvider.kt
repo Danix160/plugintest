@@ -13,8 +13,17 @@ class OnlineSerieTVProvider : MainAPI() {
     // Usiamo una variabile fissa per gli header per evitare errori "unresolved reference"
     private val commonHeaders = mapOf(
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-        "Referer" to "$mainUrl/",
-        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "Accept-Language" to "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Cache-Control" to "max-age=0",
+        "Sec-Ch-Ua" to "\"Not A(Brand\";v=\"99\", \"Google Chrome\";v=\"121\", \"Chromium\";v=\"121\"",
+        "Sec-Ch-Ua-Mobile" to "?0",
+        "Sec-Ch-Ua-Platform" to "\"Windows\"",
+        "Sec-Fetch-Dest" to "document",
+        "Sec-Fetch-Mode" to "navigate",
+        "Sec-Fetch-Site" to "none",
+        "Sec-Fetch-User" to "?1",
+        "Upgrade-Insecure-Requests" to "1",
         "Cookie" to "cf_clearance=jHXaLK2g5rOsNeP_kjGZQiwDOQzqiepHZef0nIji0Fw-1769510252-1.2.1.1-MoXidTTq4G8XdXz7LlZ5dcGPdoUDK82XRtgNNzwPQpnsi4Q3sUtARXeQCosLhLnF620xZDdoVRfz3bje784KZWVYkHXDPF6ymurr_vVLPbFmVzC8jTatBj26OZPhbmepG_hDO3hTu0rO7AW2zFekaRAbiUev38UtPXZOFTdlpndrafxdnwbUrhaYDxjZIpynEwRk4utKNih3myFNc5cVaLhpSc_s_gVdVBmhIeKCudM"
     )
 
