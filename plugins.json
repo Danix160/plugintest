@@ -1,5 +1,27 @@
 [
     {
+        "iconUrl": "https://onlineserietv.online/images/logo.svg",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/Danix160/plugintest",
+        "fileSize": 11038,
+        "status": 1,
+        "language": "it",
+        "authors": [
+            "Danix"
+        ],
+        "tvTypes": [
+            "Movie",
+            "TvSeries",
+            "Anime",
+            "Cartoon"
+        ],
+        "version": 1,
+        "internalName": "OnlineSerieTVProvider",
+        "description": "OnlineSerietv.com/Prova",
+        "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/OnlineSerieTVProvider.cs3",
+        "name": "OnlineSerieTVProvider"
+    },
+    {
         "iconUrl": "https://toonitalia.xyz/wp-content/uploads/2023/08/cropped-Majintoon-192x192.jpg",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/Danix160/plugintest",
