@@ -3,7 +3,7 @@
         "iconUrl": "https://onlineserietv.online/images/logo.svg",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/Danix160/plugintest",
-        "fileSize": 10975,
+        "fileSize": 11689,
         "status": 1,
         "language": "it",
         "authors": [
@@ -15,7 +15,7 @@
             "Anime",
             "Cartoon"
         ],
-        "version": 5,
+        "version": 6,
         "internalName": "OnlineSerieTVProvider",
         "description": "OnlineSerietv.com/Prova",
         "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/OnlineSerieTVProvider.cs3",
