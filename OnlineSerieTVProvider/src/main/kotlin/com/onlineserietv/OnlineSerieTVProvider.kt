@@ -1,8 +1,7 @@
 package com.onlineserietv
 
 import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.utils.ExtractorLink
-import com.lagradost.cloudstream3.utils.loadExtractor
+import com.lagradost.cloudstream3.utils.*
 
 class OnlineSerieTVProvider : MainAPI() {
     override var mainUrl = "https://onlineserietv.com"
@@ -17,6 +16,7 @@ class OnlineSerieTVProvider : MainAPI() {
         "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Referer" to "$mainUrl/"
     )
+
     override val mainPage = mainPageOf(
         "$mainUrl/film-streaming-ita-gratis/" to "Film",
         "$mainUrl/serie-tv-streaming-ita/" to "Serie TV",
@@ -25,7 +25,6 @@ class OnlineSerieTVProvider : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = if (page <= 1) request.data else "${request.data}page/$page/"
-        // Applichiamo i botHeaders qui
         val res = app.get(url, headers = botHeaders)
         val document = res.document
         
@@ -87,7 +86,7 @@ class OnlineSerieTVProvider : MainAPI() {
             document.select(".episodios").forEach { season ->
                 season.select("li").forEach { li ->
                     val a = li.selectFirst(".episodiotitle a") ?: return@forEach
-                    val epHref = a.attr("href")
+                    val epHref = a.attr("href") ?: return@forEach
                     val epName = a.text().trim()
                     
                     episodes.add(newEpisode(fixUrl(epHref)) {
@@ -100,8 +99,8 @@ class OnlineSerieTVProvider : MainAPI() {
                 this.plot = plot
             }
         } else {
-            val movieData = document.selectFirst("iframe")?.attr("src") ?: ""
-            newMovieLoadResponse(title, url, TvType.Movie, movieData) {
+            // Passiamo l'URL della pagina a loadLinks per cercare l'iframe lì
+            newMovieLoadResponse(title, url, TvType.Movie, url) {
                 this.posterUrl = fixUrl(poster)
                 this.plot = plot
             }
@@ -114,9 +113,22 @@ class OnlineSerieTVProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        if (data.startsWith("http")) {
-            loadExtractor(data, subtitleCallback, callback, headers = botHeaders)
+        // 1. Carichiamo la pagina passata (Film o Episodio) per trovare l'iframe del player
+        val doc = app.get(data, headers = botHeaders).document
+        val playerUrl = doc.selectFirst("iframe")?.attr("src") ?: return false
+        
+        // 2. Carichiamo la pagina del player (es. https://onlineserietv.com/video/...)
+        // Spesso il vero video host è dentro un altro iframe qui.
+        val playerDoc = app.get(fixUrl(playerUrl), headers = botHeaders).document
+        val finalVideoUrl = playerDoc.selectFirst("iframe")?.attr("src") 
+                           ?: playerDoc.selectFirst("a.btn")?.attr("href")
+
+        // 3. Se abbiamo trovato un link (es. Mixdrop, DeltaBit), usiamo loadExtractor
+        if (finalVideoUrl != null && finalVideoUrl.startsWith("http")) {
+            // Nota: rimosso 'headers = botHeaders' perché non accettato da loadExtractor
+            loadExtractor(finalVideoUrl, subtitleCallback, callback)
         }
+        
         return true
     }
 }
