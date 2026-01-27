@@ -17,7 +17,6 @@ class OnlineSerieTVProvider : MainAPI() {
         "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Referer" to "$mainUrl/"
     )
-
     override val mainPage = mainPageOf(
         "$mainUrl/film-streaming-ita-gratis/" to "Film",
         "$mainUrl/serie-tv-streaming-ita/" to "Serie TV",
