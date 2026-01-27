@@ -1,4 +1,4 @@
-package com.toonitalia // Deve essere uguale a quello in cima al file
+package com.onlineserietv // Deve essere uguale a quello in cima al file
 
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
