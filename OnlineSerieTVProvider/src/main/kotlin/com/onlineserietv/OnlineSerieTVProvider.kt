@@ -11,10 +11,14 @@ class OnlineSerieTVProvider : MainAPI() {
     override var lang = "it"
     override val hasMainPage = true
 
+    private val myCookie = "cf_clearance=jHXaLK2g5rOsNeP_kjGZQiwDOQzqiepHZef0nIji0Fw-1769510252-1.2.1.1-MoXidTTq4G8XdXz7LlZ5dcGPdoUDK82XRtgNNzwPQpnsi4Q3sUtARXeQCosLhLnF620xZDdoVRfz3bje784KZWVYkHXDPF6ymurr_vVLPbFmVzC8jTatBj26OZPhbmepG_hDO3hTu0rO7AW2zFekaRAbiUev38UtPXZOFTdlpndrafxdnwbUrhaYDxjZIpynEwRk4utKNih3myFNc5cVaLhpSc_s_gVdVBmhIeKCudM"
+
     private val commonHeaders = mapOf(
-        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+        "Cookie" to myCookie, // <--- Iniezione del cookie
+        "Referer" to "$mainUrl/",
         "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Cache-Control" to "max-age=0"
+        "Accept-Language" to "it-IT,it;q=0.9"
     )
 
     override val mainPage = mainPageOf(
@@ -43,6 +47,8 @@ class OnlineSerieTVProvider : MainAPI() {
             newMovieSearchResponse(title, fixUrl(href), if (isSeries) TvType.TvSeries else TvType.Movie) {
                 this.posterUrl = fixUrl(poster)
             }
+            // Questo forza l'app a dimenticare i vecchi cookie che potrebbero essere scaduti
+            app.baseClient.cookieJar.cookieStore.removeAll()
         }
         
         return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
