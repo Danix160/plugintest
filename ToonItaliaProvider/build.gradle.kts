@@ -1,10 +1,3 @@
-android {
-    // ... altre configurazioni
-    kotlinOptions {
-        jvmTarget = '1.8'
-        freeCompilerArgs += ["-Xskip-metadata-version-check"] // <--- Aggiungi questa riga
-    }
-}
 cloudstream {
     extra["prefix"] = "ToonItalia"
     extra["displayName"] = "ToonItalia"
