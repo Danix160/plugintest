@@ -50,6 +50,11 @@ subprojects {
             targetSdk = 35
         }
 
+        kotlinOptions {
+            jvmTarget = "1.8"
+            freeCompilerArgs = freeCompilerArgs.plus("-Xskip-metadata-version-check")
+        }
+
         compileOptions {
             sourceCompatibility = JavaVersion.VERSION_1_8
             targetCompatibility = JavaVersion.VERSION_1_8
