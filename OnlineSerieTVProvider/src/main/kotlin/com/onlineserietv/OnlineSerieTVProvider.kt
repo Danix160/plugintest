@@ -2,7 +2,6 @@ package com.onlineserietv
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
 
 class OnlineSerieTVProvider : MainAPI() {
     override var mainUrl = "https://onlineserietv.online"
@@ -11,14 +10,14 @@ class OnlineSerieTVProvider : MainAPI() {
     override var lang = "it"
     override val hasMainPage = true
 
+    // Incolla qui il tuo cookie aggiornato ogni volta che scade
     private val myCookie = "cf_clearance=jHXaLK2g5rOsNeP_kjGZQiwDOQzqiepHZef0nIji0Fw-1769510252-1.2.1.1-MoXidTTq4G8XdXz7LlZ5dcGPdoUDK82XRtgNNzwPQpnsi4Q3sUtARXeQCosLhLnF620xZDdoVRfz3bje784KZWVYkHXDPF6ymurr_vVLPbFmVzC8jTatBj26OZPhbmepG_hDO3hTu0rO7AW2zFekaRAbiUev38UtPXZOFTdlpndrafxdnwbUrhaYDxjZIpynEwRk4utKNih3myFNc5cVaLhpSc_s_gVdVBmhIeKCudM"
 
-    private val commonHeaders = mapOf(
+    private val botHeaders = mapOf(
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-        "Cookie" to myCookie, // <--- Iniezione del cookie
+        "Cookie" to myCookie,
         "Referer" to "$mainUrl/",
-        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language" to "it-IT,it;q=0.9"
+        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
     )
 
     override val mainPage = mainPageOf(
@@ -29,10 +28,10 @@ class OnlineSerieTVProvider : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = if (page <= 1) request.data else "${request.data}page/$page/"
-        val res = app.get(url, headers = commonHeaders)
+        val res = app.get(url, headers = botHeaders)
         val document = res.document
         
-        val items = document.select("div.items article.item").mapNotNull { element ->
+        val items = document.select("div.items article.item, .item").mapNotNull { element ->
             val titleElement = element.selectFirst("h3 a") ?: return@mapNotNull null
             val title = titleElement.text().trim()
             val href = titleElement.attr("href") ?: ""
@@ -47,24 +46,23 @@ class OnlineSerieTVProvider : MainAPI() {
             newMovieSearchResponse(title, fixUrl(href), if (isSeries) TvType.TvSeries else TvType.Movie) {
                 this.posterUrl = fixUrl(poster)
             }
-            // Questo forza l'app a dimenticare i vecchi cookie che potrebbero essere scaduti
-            app.baseClient.cookieJar.cookieStore.removeAll()
         }
         
-        return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
+        // Correzione firma: usiamo i nomi espliciti dei parametri per evitare ambiguità
+        return newHomePageResponse(name = request.name, list = items, hasNext = items.isNotEmpty())
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/?s=$query" 
-        val res = app.get(url, headers = commonHeaders)
+        val res = app.get(url, headers = botHeaders)
         val document = res.document
         
-        return document.select("div.result-item, article.item").mapNotNull { element ->
-            val titleElement = element.selectFirst(".title a, h3 a") ?: return@mapNotNull null
+        return document.select("div.items article.item, div.result-item").mapNotNull { element ->
+            val titleElement = element.selectFirst("h3 a, .title a") ?: return@mapNotNull null
             val title = titleElement.text().trim()
             val href = titleElement.attr("href") ?: ""
             
-            val img = element.selectFirst("img")
+            val img = element.selectFirst(".poster img, img")
             val poster = img?.attr("data-src") ?: img?.attr("src") ?: ""
             
             val isSeries = href.contains("/serie-tv/") || href.contains("/serietv/")
@@ -76,15 +74,11 @@ class OnlineSerieTVProvider : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val res = app.get(url, headers = commonHeaders)
+        val res = app.get(url, headers = botHeaders)
         val document = res.document
         
-        val title = document.selectFirst(".data h1")?.text()?.trim() 
-                    ?: document.selectFirst("h1")?.text()?.trim() 
-                    ?: "Senza Titolo"
-        
-        val poster = document.selectFirst(".poster img")?.attr("data-src") 
-                     ?: document.selectFirst(".poster img")?.attr("src") ?: ""
+        val title = document.selectFirst(".data h1")?.text()?.trim() ?: "Senza Titolo"
+        val poster = document.selectFirst(".poster img")?.attr("src") ?: ""
         val plot = document.selectFirst(".wp-content p, .resumen")?.text()?.trim()
         
         val isSeries = url.contains("/serie-tv/") || document.selectFirst("#seasons") != null
@@ -95,17 +89,8 @@ class OnlineSerieTVProvider : MainAPI() {
                 season.select("li").forEach { li ->
                     val a = li.selectFirst(".episodiotitle a") ?: return@forEach
                     val epHref = a.attr("href") ?: return@forEach
-                    val epName = a.text().trim()
-                    
-                    // Estrae stagione ed episodio dall'interfaccia se possibile
-                    val meta = li.selectFirst(".numerando")?.text() ?: "" // Esempio "1 - 1"
-                    val s = meta.substringBefore("-").trim().toIntOrNull()
-                    val e = meta.substringAfter("-").trim().toIntOrNull()
-
                     episodes.add(newEpisode(fixUrl(epHref)) {
-                        this.name = epName
-                        this.season = s
-                        this.episode = e
+                        this.name = a.text().trim()
                     })
                 }
             }
@@ -117,7 +102,6 @@ class OnlineSerieTVProvider : MainAPI() {
             newMovieLoadResponse(title, url, TvType.Movie, url) {
                 this.posterUrl = fixUrl(poster)
                 this.plot = plot
-                addTrailer(document.selectFirst("iframe[src*='youtube']")?.attr("src"))
             }
         }
     }
@@ -128,26 +112,13 @@ class OnlineSerieTVProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val doc = app.get(data, headers = commonHeaders).document
-        
-        // Cerca tutti gli iframe perché a volte ce n'è più di uno (trailer + player)
+        val doc = app.get(data, headers = botHeaders).document
         doc.select("iframe").forEach { iframe ->
             val src = iframe.attr("src")
-            if (src.contains("youtube").not()) {
+            if (src.isNotBlank() && !src.contains("youtube")) {
                 loadExtractor(fixUrl(src), data, subtitleCallback, callback)
             }
         }
-        
-        // Cerca anche link nei bottoni "Player"
-        doc.select("li[id^='player-option']").forEach { option ->
-            val type = option.attr("data-type")
-            val post = option.attr("data-post")
-            val nume = option.attr("data-nume")
-            
-            // Alcuni siti caricano l'iframe via AJAX quando clicchi. 
-            // Per ora proviamo la scansione degli iframe già presenti.
-        }
-        
         return true
     }
 }
