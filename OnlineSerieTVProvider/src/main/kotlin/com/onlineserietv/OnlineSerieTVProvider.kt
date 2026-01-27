@@ -4,7 +4,7 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 
 class OnlineSerieTVProvider : MainAPI() {
-    override var mainUrl = "https://onlineserietv.com"
+    override var mainUrl = "https://onlineserietv.online"
     override var name = "OnlineSerieTV"
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
     override var lang = "it"
