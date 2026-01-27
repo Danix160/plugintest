@@ -2,6 +2,7 @@ package com.onlineserietv
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
+import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
 
 class OnlineSerieTVProvider : MainAPI() {
     override var mainUrl = "https://onlineserietv.online"
@@ -10,80 +11,74 @@ class OnlineSerieTVProvider : MainAPI() {
     override var lang = "it"
     override val hasMainPage = true
 
-    // Header per simulare Googlebot e bypassare i controlli Cloudflare
-    private val botHeaders = mapOf(
-        "User-Agent" to "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+    private val commonHeaders = mapOf(
+        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Referer" to "$mainUrl/"
+        "Cache-Control" to "max-age=0"
     )
 
     override val mainPage = mainPageOf(
-    "$mainUrl/movies/" to "Film",
-    "$mainUrl/serie-tv/" to "Serie TV",
-    "$mainUrl/serie-tv-generi/animazione/" to "Animazione"
-)
+        "$mainUrl/movies/" to "Film",
+        "$mainUrl/serie-tv/" to "Serie TV",
+        "$mainUrl/serie-tv-generi/animazione/" to "Animazione"
+    )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-    val url = if (page <= 1) request.data else "${request.data}page/$page/"
-    val res = app.get(url, headers = botHeaders)
-    val document = res.document
-    
-    val items = document.select("div.items article.item, .item").mapNotNull { element ->
-        val titleElement = element.selectFirst("h3 a") ?: return@mapNotNull null
-        val title = titleElement.text().trim()
-        val href = titleElement.attr("href") ?: ""
+        val url = if (page <= 1) request.data else "${request.data}page/$page/"
+        val res = app.get(url, headers = commonHeaders)
+        val document = res.document
         
-        val img = element.selectFirst(".poster img")
-        val poster = img?.attr("data-src")?.takeIf { it.isNotBlank() } 
-                     ?: img?.attr("src") 
-                     ?: ""
+        val items = document.select("div.items article.item").mapNotNull { element ->
+            val titleElement = element.selectFirst("h3 a") ?: return@mapNotNull null
+            val title = titleElement.text().trim()
+            val href = titleElement.attr("href") ?: ""
+            
+            val img = element.selectFirst(".poster img")
+            val poster = img?.attr("data-src")?.takeIf { it.isNotBlank() } 
+                         ?: img?.attr("src") 
+                         ?: ""
 
-        val isSeries = href.contains("/serie-tv/") || href.contains("/serietv/")
+            val isSeries = href.contains("/serie-tv/") || href.contains("/serietv/")
 
-        newMovieSearchResponse(title, fixUrl(href), if (isSeries) TvType.TvSeries else TvType.Movie) {
-            this.posterUrl = fixUrl(poster)
+            newMovieSearchResponse(title, fixUrl(href), if (isSeries) TvType.TvSeries else TvType.Movie) {
+                this.posterUrl = fixUrl(poster)
+            }
+        }
+        
+        return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
+    }
+
+    override suspend fun search(query: String): List<SearchResponse> {
+        val url = "$mainUrl/?s=$query" 
+        val res = app.get(url, headers = commonHeaders)
+        val document = res.document
+        
+        return document.select("div.result-item, article.item").mapNotNull { element ->
+            val titleElement = element.selectFirst(".title a, h3 a") ?: return@mapNotNull null
+            val title = titleElement.text().trim()
+            val href = titleElement.attr("href") ?: ""
+            
+            val img = element.selectFirst("img")
+            val poster = img?.attr("data-src") ?: img?.attr("src") ?: ""
+            
+            val isSeries = href.contains("/serie-tv/") || href.contains("/serietv/")
+
+            newMovieSearchResponse(title, fixUrl(href), if (isSeries) TvType.TvSeries else TvType.Movie) {
+                this.posterUrl = fixUrl(poster)
+            }
         }
     }
-    
-    return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
-}
-
-   override suspend fun search(query: String): List<SearchResponse> {
-    // Il nuovo sito usa questo formato per la ricerca
-    val url = "$mainUrl/?s=$query" 
-    val res = app.get(url, headers = botHeaders)
-    val document = res.document
-    
-    // Cerchiamo i contenitori corretti (article.item)
-    return document.select("div.items article.item").mapNotNull { element ->
-        val titleElement = element.selectFirst("h3 a") ?: return@mapNotNull null
-        val title = titleElement.text().trim()
-        val href = titleElement.attr("href") ?: ""
-        
-        val img = element.selectFirst(".poster img")
-        // data-src gestisce il caricamento ritardato (lazy loading)
-        val poster = img?.attr("data-src")?.takeIf { it.isNotBlank() } 
-                     ?: img?.attr("src") 
-                     ?: ""
-        
-        // Verifica se è serie o film basandosi sull'URL
-        val isSeries = href.contains("/serie-tv/") || href.contains("/serietv/")
-
-        newMovieSearchResponse(title, fixUrl(href), if (isSeries) TvType.TvSeries else TvType.Movie) {
-            this.posterUrl = fixUrl(poster)
-        }
-    }
-}
 
     override suspend fun load(url: String): LoadResponse {
-        val res = app.get(url, headers = botHeaders)
+        val res = app.get(url, headers = commonHeaders)
         val document = res.document
         
         val title = document.selectFirst(".data h1")?.text()?.trim() 
                     ?: document.selectFirst("h1")?.text()?.trim() 
                     ?: "Senza Titolo"
         
-        val poster = document.selectFirst(".poster img")?.attr("src") ?: ""
+        val poster = document.selectFirst(".poster img")?.attr("data-src") 
+                     ?: document.selectFirst(".poster img")?.attr("src") ?: ""
         val plot = document.selectFirst(".wp-content p, .resumen")?.text()?.trim()
         
         val isSeries = url.contains("/serie-tv/") || document.selectFirst("#seasons") != null
@@ -96,8 +91,15 @@ class OnlineSerieTVProvider : MainAPI() {
                     val epHref = a.attr("href") ?: return@forEach
                     val epName = a.text().trim()
                     
+                    // Estrae stagione ed episodio dall'interfaccia se possibile
+                    val meta = li.selectFirst(".numerando")?.text() ?: "" // Esempio "1 - 1"
+                    val s = meta.substringBefore("-").trim().toIntOrNull()
+                    val e = meta.substringAfter("-").trim().toIntOrNull()
+
                     episodes.add(newEpisode(fixUrl(epHref)) {
                         this.name = epName
+                        this.season = s
+                        this.episode = e
                     })
                 }
             }
@@ -106,10 +108,10 @@ class OnlineSerieTVProvider : MainAPI() {
                 this.plot = plot
             }
         } else {
-            // Passiamo l'URL della pagina a loadLinks per cercare l'iframe lì
             newMovieLoadResponse(title, url, TvType.Movie, url) {
                 this.posterUrl = fixUrl(poster)
                 this.plot = plot
+                addTrailer(document.selectFirst("iframe[src*='youtube']")?.attr("src"))
             }
         }
     }
@@ -120,20 +122,24 @@ class OnlineSerieTVProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // 1. Carichiamo la pagina passata (Film o Episodio) per trovare l'iframe del player
-        val doc = app.get(data, headers = botHeaders).document
-        val playerUrl = doc.selectFirst("iframe")?.attr("src") ?: return false
+        val doc = app.get(data, headers = commonHeaders).document
         
-        // 2. Carichiamo la pagina del player (es. https://onlineserietv.com/video/...)
-        // Spesso il vero video host è dentro un altro iframe qui.
-        val playerDoc = app.get(fixUrl(playerUrl), headers = botHeaders).document
-        val finalVideoUrl = playerDoc.selectFirst("iframe")?.attr("src") 
-                           ?: playerDoc.selectFirst("a.btn")?.attr("href")
-
-        // 3. Se abbiamo trovato un link (es. Mixdrop, DeltaBit), usiamo loadExtractor
-        if (finalVideoUrl != null && finalVideoUrl.startsWith("http")) {
-            // Nota: rimosso 'headers = botHeaders' perché non accettato da loadExtractor
-            loadExtractor(finalVideoUrl, subtitleCallback, callback)
+        // Cerca tutti gli iframe perché a volte ce n'è più di uno (trailer + player)
+        doc.select("iframe").forEach { iframe ->
+            val src = iframe.attr("src")
+            if (src.contains("youtube").not()) {
+                loadExtractor(fixUrl(src), data, subtitleCallback, callback)
+            }
+        }
+        
+        // Cerca anche link nei bottoni "Player"
+        doc.select("li[id^='player-option']").forEach { option ->
+            val type = option.attr("data-type")
+            val post = option.attr("data-post")
+            val nume = option.attr("data-nume")
+            
+            // Alcuni siti caricano l'iframe via AJAX quando clicchi. 
+            // Per ora proviamo la scansione degli iframe già presenti.
         }
         
         return true
