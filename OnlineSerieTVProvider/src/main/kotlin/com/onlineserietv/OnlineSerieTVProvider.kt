@@ -10,14 +10,12 @@ class OnlineSerieTVProvider : MainAPI() {
     override var lang = "it"
     override val hasMainPage = true
 
-    // Incolla qui il tuo cookie aggiornato ogni volta che scade
-    private val cfKiller = CloudflareKiller()
-
+    // Usiamo una variabile fissa per gli header per evitare errori "unresolved reference"
     private val commonHeaders = mapOf(
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+        "Referer" to "$mainUrl/",
         "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language" to "it-IT,it;q=0.9",
-        "Referer" to "$mainUrl/"
+        "Cookie" to "cf_clearance=jHXaLK2g5rOsNeP_kjGZQiwDOQzqiepHZef0nIji0Fw-1769510252-1.2.1.1-MoXidTTq4G8XdXz7LlZ5dcGPdoUDK82XRtgNNzwPQpnsi4Q3sUtARXeQCosLhLnF620xZDdoVRfz3bje784KZWVYkHXDPF6ymurr_vVLPbFmVzC8jTatBj26OZPhbmepG_hDO3hTu0rO7AW2zFekaRAbiUev38UtPXZOFTdlpndrafxdnwbUrhaYDxjZIpynEwRk4utKNih3myFNc5cVaLhpSc_s_gVdVBmhIeKCudM"
     )
 
     override val mainPage = mainPageOf(
@@ -28,7 +26,7 @@ class OnlineSerieTVProvider : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = if (page <= 1) request.data else "${request.data}page/$page/"
-        val res = app.get(url, headers = botHeaders)
+        val res = app.get(url, headers = commonHeaders)
         val document = res.document
         
         val items = document.select("div.items article.item, .item").mapNotNull { element ->
@@ -48,13 +46,12 @@ class OnlineSerieTVProvider : MainAPI() {
             }
         }
         
-        // Correzione firma: usiamo i nomi espliciti dei parametri per evitare ambiguità
         return newHomePageResponse(name = request.name, list = items, hasNext = items.isNotEmpty())
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/?s=$query" 
-        val res = app.get(url, headers = botHeaders)
+        val res = app.get(url, headers = commonHeaders)
         val document = res.document
         
         return document.select("div.items article.item, div.result-item").mapNotNull { element ->
@@ -74,7 +71,7 @@ class OnlineSerieTVProvider : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val res = app.get(url, headers = botHeaders)
+        val res = app.get(url, headers = commonHeaders)
         val document = res.document
         
         val title = document.selectFirst(".data h1")?.text()?.trim() ?: "Senza Titolo"
@@ -112,7 +109,8 @@ class OnlineSerieTVProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val doc = app.get(data, headers = botHeaders).document
+        val res = app.get(data, headers = commonHeaders)
+        val doc = res.document
         doc.select("iframe").forEach { iframe ->
             val src = iframe.attr("src")
             if (src.isNotBlank() && !src.contains("youtube")) {
