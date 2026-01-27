@@ -18,31 +18,27 @@ class OnlineSerieTVProvider : MainAPI() {
     )
 
     override val mainPage = mainPageOf(
-        "$mainUrl/film-streaming-ita-gratis/" to "Film",
-        "$mainUrl/serie-tv-streaming-ita/" to "Serie TV",
-        "$mainUrl/generi/animazione/" to "Animazione"
-    )
+    "$mainUrl/movies/" to "Film",
+    "$mainUrl/serie-tv/" to "Serie TV",
+    "$mainUrl/serie-tv-generi/animazione/" to "Animazione"
+)
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
     val url = if (page <= 1) request.data else "${request.data}page/$page/"
     val res = app.get(url, headers = botHeaders)
     val document = res.document
     
-    // Cambiato il selettore per trovare correttamente i contenitori
-    val items = document.select("div.items .item, article.item").mapNotNull { element ->
-        // Il titolo ora è direttamente in h3 a dentro l'elemento
+    val items = document.select("div.items article.item, .item").mapNotNull { element ->
         val titleElement = element.selectFirst("h3 a") ?: return@mapNotNull null
         val title = titleElement.text().trim()
         val href = titleElement.attr("href") ?: ""
         
         val img = element.selectFirst(".poster img")
-        // Il sito ora usa spesso 'src' direttamente o 'data-src' per il lazy load
         val poster = img?.attr("data-src")?.takeIf { it.isNotBlank() } 
                      ?: img?.attr("src") 
                      ?: ""
 
-        // Controllo migliorato per distinguere Serie TV da Film
-        val isSeries = href.contains("/serietv/") || href.contains("/serie-tv/")
+        val isSeries = href.contains("/serie-tv/") || href.contains("/serietv/")
 
         newMovieSearchResponse(title, fixUrl(href), if (isSeries) TvType.TvSeries else TvType.Movie) {
             this.posterUrl = fixUrl(poster)
@@ -53,24 +49,25 @@ class OnlineSerieTVProvider : MainAPI() {
 }
 
    override suspend fun search(query: String): List<SearchResponse> {
-    // 1. Usa il nuovo endpoint di ricerca del sito .online
-    val url = "$mainUrl/search/$query/" 
+    // Il nuovo sito usa questo formato per la ricerca
+    val url = "$mainUrl/?s=$query" 
     val res = app.get(url, headers = botHeaders)
     val document = res.document
     
-    // 2. Assicurati di NON avere TODO() qui sotto
-    return document.select(".items .item").mapNotNull { element ->
+    // Cerchiamo i contenitori corretti (article.item)
+    return document.select("div.items article.item").mapNotNull { element ->
         val titleElement = element.selectFirst("h3 a") ?: return@mapNotNull null
         val title = titleElement.text().trim()
         val href = titleElement.attr("href") ?: ""
         
         val img = element.selectFirst(".poster img")
-        // Risolve l'errore 404: prendiamo l'URL corretto dell'immagine
+        // data-src gestisce il caricamento ritardato (lazy loading)
         val poster = img?.attr("data-src")?.takeIf { it.isNotBlank() } 
                      ?: img?.attr("src") 
                      ?: ""
         
-        val isSeries = href.contains("/serietv/") || href.contains("/serie-tv/")
+        // Verifica se è serie o film basandosi sull'URL
+        val isSeries = href.contains("/serie-tv/") || href.contains("/serietv/")
 
         newMovieSearchResponse(title, fixUrl(href), if (isSeries) TvType.TvSeries else TvType.Movie) {
             this.posterUrl = fixUrl(poster)
