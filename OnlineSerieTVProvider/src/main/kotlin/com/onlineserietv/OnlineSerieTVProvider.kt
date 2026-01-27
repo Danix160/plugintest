@@ -11,13 +11,13 @@ class OnlineSerieTVProvider : MainAPI() {
     override val hasMainPage = true
 
     // Incolla qui il tuo cookie aggiornato ogni volta che scade
-    private val myCookie = "cf_clearance=jHXaLK2g5rOsNeP_kjGZQiwDOQzqiepHZef0nIji0Fw-1769510252-1.2.1.1-MoXidTTq4G8XdXz7LlZ5dcGPdoUDK82XRtgNNzwPQpnsi4Q3sUtARXeQCosLhLnF620xZDdoVRfz3bje784KZWVYkHXDPF6ymurr_vVLPbFmVzC8jTatBj26OZPhbmepG_hDO3hTu0rO7AW2zFekaRAbiUev38UtPXZOFTdlpndrafxdnwbUrhaYDxjZIpynEwRk4utKNih3myFNc5cVaLhpSc_s_gVdVBmhIeKCudM"
+    private val cfKiller = CloudflareKiller()
 
-    private val botHeaders = mapOf(
+    private val commonHeaders = mapOf(
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-        "Cookie" to myCookie,
-        "Referer" to "$mainUrl/",
-        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language" to "it-IT,it;q=0.9",
+        "Referer" to "$mainUrl/"
     )
 
     override val mainPage = mainPageOf(
