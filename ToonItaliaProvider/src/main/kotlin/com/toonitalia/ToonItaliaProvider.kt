@@ -106,6 +106,19 @@ class ToonItaliaProvider : MainAPI() {
                 !href.contains("toonitalia.xyz") && 
                 supportedHosts.any { host -> href.contains(host) || linkText.contains(host) }
             }
+            // --- RILEVAMENTO CAMBIO STAGIONE (DISK / VOLUME / PARTE) ---
+            if (validLinks.isEmpty() && text.length > 3 && !isMovieUrl) {
+                // Se la riga contiene parole come Disk, Volume, Parte o Stagione
+                val seasonKeywords = Regex("(?i)disk|volume|stagione|serie|saga|\\b\\d+°\\b")
+                if (seasonKeywords.containsMatchIn(text)) {
+                    // Incrementiamo la stagione solo se abbiamo già aggiunto episodi nella stagione precedente
+                    if (episodes.isNotEmpty()) {
+                        currentSeason++
+                        autoEpCounter = 1 // Resetta il conteggio episodi per il nuovo disco
+                    }
+                }
+                return@forEach
+            }
 
             if (validLinks.isNotEmpty()) {
                 val isTrailerRow = text.contains(Regex("(?i)sigla|intro|trailer"))
