@@ -22,7 +22,7 @@ class ToonItaliaProvider : MainAPI() {
     )
 
     private val supportedHosts = listOf(
-        "voe", "chuckle-tube", "luluvdo", "lulustream", "vidhide",  "rpmshare"
+        "voe", "chuckle-tube", "luluvdo", "lulustream", "vidhide",  "rpmshare",
         "mixdrop", "streamtape", "fastream", "filemoon", "wolfstream", "streamwish"
     )
 
