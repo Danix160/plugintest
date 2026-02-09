@@ -3,8 +3,9 @@ package com.toonitalia
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
+import com.lagradost.cloudstream3.MainAPI
+import com.lagradost.cloudstream3.TvType
 import org.jsoup.Jsoup
-import org.jsoup.nodes.Element
 
 class ToonItaliaProvider : MainAPI() {
     override var mainUrl = "https://toonitalia.xyz"
@@ -22,7 +23,7 @@ class ToonItaliaProvider : MainAPI() {
 
     private val supportedHosts = listOf(
         "voe", "chuckle-tube", "luluvdo", "lulustream", "vidhide", 
-        "mixdrop", "streamtape", "fastream", "filemoon", "wolfstream", "streamwish"
+        "mixdrop", "streamtape", "fastream", "filemoon", "wolfstream", "streamwish", "vidoza"
     )
 
     override val mainPage = mainPageOf(
@@ -77,70 +78,83 @@ class ToonItaliaProvider : MainAPI() {
         val entryContent = document.selectFirst("div.entry-content")
         val episodes = mutableListOf<Episode>()
 
-        // --- NUOVA LOGICA DI SUDDIVISIONE PER TITOLI (STAGIONI) ---
-        var currentSeason = 0
-        var autoEpCounter = 1
+        // Dividiamo il contenuto HTML in blocchi basandoci sui ritorni a capo
+        val blocks = entryContent?.html()?.split(Regex("(?i)<br\\s*/?>|</p>|</div>|<li>|\\n")) ?: listOf()
+
+        var currentSeason = 1
         var currentSeasonName = ""
+        var autoEpCounter = 1
 
-        // Iteriamo su tutti i figli di entry-content (p, h3, div, etc.)
-        entryContent?.children()?.forEach { element ->
-            val text = element.text().trim()
-            val hasLinks = element.select("a").any { a -> 
-                supportedHosts.any { host -> a.attr("href").contains(host) }
+        blocks.forEach { blockHtml ->
+            val doc = Jsoup.parseBodyFragment(blockHtml)
+            val text = doc.text().trim()
+            
+            // Trova tutti i link video presenti in questa specifica riga
+            val links = doc.select("a").filter { a ->
+                val href = a.attr("href")
+                supportedHosts.any { host -> href.contains(host) }
             }
 
-            // Se l'elemento è un titolo (h1-h6) o un testo in grassetto senza link, è una NUOVA STAGIONE
-            val isHeader = element.tagName().startsWith("h") || 
-                           (element.select("strong, b").isNotEmpty() && !hasLinks && text.length < 100)
-
-            if (isHeader && text.isNotBlank()) {
-                currentSeason++
-                autoEpCounter = 1 // Resetta il numero episodio per la nuova stagione
-                currentSeasonName = text
-            }
-
-            // Se non abbiamo ancora trovato un titolo ma ci sono episodi, partiamo dalla Stagione 1
-            if (currentSeason == 0 && hasLinks) currentSeason = 1
-
-            // Cerchiamo i link video in questo elemento o nei suoi figli
-            val linksInElement = element.select("a").filter { a ->
-                supportedHosts.any { host -> a.attr("href").contains(host) }
-            }
-
-            if (linksInElement.isNotEmpty()) {
-                val matchSimple = Regex("""\b(\d+)\b""").find(text)
-                val e = matchSimple?.groupValues?.get(1)?.toIntOrNull() ?: autoEpCounter
+            if (links.isEmpty()) {
+                // Se la riga è un titolo (grassetto o header) e non ha link, identifichiamo una nuova stagione
+                if (text.length in 3..70 && !text.contains(Regex("(?i)episodio|link|clicca|streaming"))) {
+                    if (episodes.isNotEmpty()) {
+                        currentSeason++
+                        autoEpCounter = 1 // Reset counter per la nuova parte/stagione
+                    }
+                    currentSeasonName = text
+                }
+            } else {
+                // Estraiamo il numero dell'episodio dal testo, se presente
+                val epMatch = Regex("""\b(\d+)\b""").find(text)
+                val e = epMatch?.groupValues?.get(1)?.toIntOrNull() ?: autoEpCounter
                 
-                val dataUrls = linksInElement.map { it.attr("href") }.joinToString("###")
+                // Uniamo i link della stessa riga (es. Voe e Mixdrop dello stesso episodio)
+                val dataUrls = links.map { it.attr("href") }.joinToString("###")
                 
-                // Pulizia nome episodio
-                var epDisplayName = text.split(Regex("(?i)VOE|Lulu|Vidhide|Mixdrop|Streamtape")).first().trim()
-                if (epDisplayName.length < 3) epDisplayName = "Episodio $e"
-                
-                // Aggiungiamo il nome della stagione se disponibile
-                val finalName = if (currentSeasonName.isNotBlank()) "[$currentSeasonName] $epDisplayName" else epDisplayName
+                var epDisplayName = text.split(Regex("(?i)VOE|Lulu|Vidhide|Mixdrop|Streamtape|Vidoza")).first()
+                    .replace(Regex("""^[-–—\s\d]+|[-–—\s]+$"""), "").trim()
+
+                if (epDisplayName.isEmpty() || epDisplayName.length < 2) {
+                    epDisplayName = "Episodio $e"
+                }
 
                 episodes.add(newEpisode(dataUrls) {
-                    this.name = finalName
+                    this.name = if (currentSeasonName.isNotEmpty()) "[$currentSeasonName] $epDisplayName" else epDisplayName
                     this.season = currentSeason
                     this.episode = e
                     this.posterUrl = poster
                 })
+                
                 autoEpCounter = e + 1
             }
         }
 
+        val isMovie = url.contains("film") || (episodes.size == 1 && currentSeason == 1)
         val finalEpisodes = episodes.distinctBy { it.data + it.name }
-            .sortedWith(compareBy({ it.season ?: 0 }, { it.episode ?: 0 }))
+            .sortedWith(compareBy({ it.season ?: 1 }, { it.episode ?: 0 }))
 
-        return newTvSeriesLoadResponse(title, url, TvType.TvSeries, finalEpisodes) {
-            this.posterUrl = poster
-            this.posterHeaders = commonHeaders
-            this.plot = document.select("div.entry-content p").firstOrNull { it.text().length > 50 }?.text()
+        return if (isMovie) {
+            newMovieLoadResponse(title, url, TvType.Movie, finalEpisodes.firstOrNull()?.data ?: "") {
+                this.posterUrl = poster
+                this.plot = document.select("div.entry-content p").firstOrNull { it.text().length > 50 }?.text()
+                this.posterHeaders = commonHeaders
+            }
+        } else {
+            newTvSeriesLoadResponse(title, url, TvType.TvSeries, finalEpisodes) {
+                this.posterUrl = poster
+                this.plot = document.select("div.entry-content p").firstOrNull { it.text().length > 50 }?.text()
+                this.posterHeaders = commonHeaders
+            }
         }
     }
 
-    override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
+    override suspend fun loadLinks(
+        data: String,
+        isCasting: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
         data.split("###").forEach { url ->
             loadExtractor(fixHostUrl(url), subtitleCallback, callback)
         }
