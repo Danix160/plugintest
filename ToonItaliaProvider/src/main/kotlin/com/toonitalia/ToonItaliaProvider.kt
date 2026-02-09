@@ -79,7 +79,6 @@ class ToonItaliaProvider : MainAPI() {
             ?: img?.attr("src")?.takeIf { it.isNotBlank() && !it.contains("placeholder") }
             ?: searchPlaceholderLogo
 
-        // --- ESTRAZIONE TRAMA, DURATA E ANNO ---
         val entryContent = document.selectFirst("div.entry-content")
         val fullText = entryContent?.text() ?: ""
 
@@ -93,12 +92,17 @@ class ToonItaliaProvider : MainAPI() {
         val episodes = mutableListOf<Episode>()
         val isMovieUrl = url.contains("film") || url.contains("film-animazione")
         
+        // Dividiamo il contenuto per righe preservando la struttura
         val lines = entryContent?.html()?.split(Regex("<br\\s*/?>|</p>|</div>|<li>|\\n")) ?: listOf()
+        
+        var currentSeason = 1
         var autoEpCounter = 1
 
         lines.forEach { line ->
             val docLine = Jsoup.parseBodyFragment(line)
             val text = docLine.text().trim()
+            if (text.isEmpty()) return@forEach
+
             val validLinks = docLine.select("a").filter { a -> 
                 val href = a.attr("href")
                 val linkText = a.text().lowercase()
@@ -107,17 +111,35 @@ class ToonItaliaProvider : MainAPI() {
                 supportedHosts.any { host -> href.contains(host) || linkText.contains(host) }
             }
 
+            // --- LOGICA RILEVAMENTO NUOVA STAGIONE ---
+            // Se non ci sono link e il testo sembra un'intestazione (es. Monogatari Second Season)
+            if (validLinks.isEmpty() && text.length in 4..60 && !isMovieUrl) {
+                val isNewSection = text.contains(Regex("(?i)stagione|serie|saga|arc|\\b\\d+°\\b|\\bparte\\b")) 
+                                   || text.all { it.isUpperCase() || !it.isLetter() }
+                
+                if (isNewSection) {
+                    if (episodes.isNotEmpty()) currentSeason++
+                    autoEpCounter = 1 // Reset contatore per la nuova saga
+                }
+                return@forEach
+            }
+
             if (validLinks.isNotEmpty()) {
                 val isTrailerRow = text.contains(Regex("(?i)sigla|intro|trailer"))
+                
+                // Cerchiamo il numero episodio (es. "01" o "1x01")
                 val matchSE = Regex("""(\d+)[×x](\d+)""").find(text)
-                val matchSimple = Regex("""^(\d+)""").find(text)
+                val matchSimple = Regex("""(\d+)""").find(text)
 
-                val s = if (isTrailerRow) 0 else if (isMovieUrl) null else (matchSE?.groupValues?.get(1)?.toIntOrNull() ?: 1)
+                val s = if (isTrailerRow) 0 else if (isMovieUrl) null else (matchSE?.groupValues?.get(1)?.toIntOrNull() ?: currentSeason)
                 val e = if (isTrailerRow) 0 else if (isMovieUrl) null else (matchSE?.groupValues?.get(2)?.toIntOrNull() ?: matchSimple?.groupValues?.get(1)?.toIntOrNull() ?: autoEpCounter)
 
                 val dataUrls = validLinks.map { it.attr("href") }.joinToString("###")
-                var epName = text.replace(Regex("""^\d+[×x]\d+|^\d+"""), "").replace("–", "").trim()
-                epName = epName.split(Regex("(?i)VOE|LuluStream|Lulu|Streaming|Vidhide|Mixdrop")).first().trim()
+                
+                // Pulizia nome episodio: togliamo i nomi degli host e i numeri iniziali
+                var epName = text.split(Regex("(?i)VOE|Lulu|Stream|Vidhide|Mixdrop|Vido")).first()
+                    .replace(Regex("""^\d+[×x]\d+|^\d+\s?[-–]\s?|^\d+"""), "")
+                    .trim()
                 
                 if (epName.isEmpty() || epName.length < 2) {
                     epName = if (isMovieUrl) "Film" else "Episodio $e"
@@ -131,15 +153,15 @@ class ToonItaliaProvider : MainAPI() {
                 })
 
                 if (!isMovieUrl && !isTrailerRow) {
-                    if (matchSE == null && matchSimple == null) autoEpCounter++ 
-                    else if (e != null && e >= autoEpCounter) autoEpCounter = e + 1
+                    // Aggiorna il contatore automatico basandosi sull'ultimo episodio trovato
+                    if (e != null && e >= autoEpCounter) autoEpCounter = e + 1
+                    else if (matchSE == null && matchSimple == null) autoEpCounter++
                 }
             }
         }
 
         val tvType = if (isMovieUrl) TvType.Movie else TvType.TvSeries
-        val finalEpisodes = episodes.distinctBy { it.name + it.episode.toString() + it.season.toString() }
-            .sortedWith(compareBy({ it.season ?: 0 }, { it.episode ?: 0 }))
+        val finalEpisodes = episodes.distinctBy { "${it.season}-${it.episode}-${it.name}" }
 
         return if (tvType == TvType.Movie) {
             newMovieLoadResponse(title, url, TvType.Movie, finalEpisodes.firstOrNull()?.data ?: "") {
