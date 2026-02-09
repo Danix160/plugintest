@@ -23,7 +23,7 @@ class ToonItaliaProvider : MainAPI() {
 
     private val supportedHosts = listOf(
         "voe", "chuckle-tube", "luluvdo", "lulustream", "vidhide", 
-        "mixdrop", "streamtape", "fastream", "filemoon", "wolfstream", "streamwish", "vidoza"
+        "mixdrop", "streamtape", "fastream", "filemoon", "wolfstream", "streamwish"
     )
 
     override val mainPage = mainPageOf(
@@ -40,19 +40,20 @@ class ToonItaliaProvider : MainAPI() {
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val url = if (page <= 1) request.data else "${request.data.removeSuffix("/")}/page/$page/"
-        val document = app.get(url, headers = commonHeaders).document
+        val document = app.get(request.data, headers = commonHeaders).document
         val items = document.select("article").mapNotNull { article ->
             val titleHeader = article.selectFirst("h2.entry-title a") ?: return@mapNotNull null
             val img = article.selectFirst("img")
-            val posterUrl = img?.attr("data-src") ?: img?.attr("data-lazy-src") ?: img?.attr("src")
+            val posterUrl = img?.attr("data-src")?.takeIf { it.isNotBlank() } 
+                ?: img?.attr("data-lazy-src")?.takeIf { it.isNotBlank() } 
+                ?: img?.attr("src")
 
             newTvSeriesSearchResponse(titleHeader.text(), titleHeader.attr("href"), TvType.TvSeries) {
                 this.posterUrl = posterUrl
                 this.posterHeaders = commonHeaders
             }
         }
-        return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
+        return newHomePageResponse(request.name, items)
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
@@ -73,77 +74,87 @@ class ToonItaliaProvider : MainAPI() {
         val title = document.selectFirst("h1.entry-title")?.text()?.replace(Regex("(?i)streaming|sub\\s?ita"), "")?.trim() ?: ""
         
         val img = document.selectFirst("div.entry-content img, .post-thumbnail img")
-        val poster = img?.attr("data-src") ?: img?.attr("data-lazy-src") ?: img?.attr("src") ?: searchPlaceholderLogo
+        val poster = img?.attr("data-src")?.takeIf { it.isNotBlank() } 
+            ?: img?.attr("data-lazy-src")?.takeIf { it.isNotBlank() }
+            ?: img?.attr("src")?.takeIf { it.isNotBlank() && !it.contains("placeholder") }
+            ?: searchPlaceholderLogo
 
+        // --- ESTRAZIONE TRAMA, DURATA E ANNO ---
         val entryContent = document.selectFirst("div.entry-content")
+        val fullText = entryContent?.text() ?: ""
+
+        val plot = document.select("div.entry-content p")
+            .map { it.text() }
+            .firstOrNull { it.length > 60 && !it.contains(Regex("(?i)VOE|Lulu|Vidhide|Mixdrop|Streamtape")) }
+
+        val duration = Regex("""(\d+)\s?min""").find(fullText)?.groupValues?.get(1)?.toIntOrNull()
+        val year = Regex("""\b(19\d{2}|20[0-2]\d)\b""").find(fullText)?.groupValues?.get(1)?.toIntOrNull()
+
         val episodes = mutableListOf<Episode>()
-
-        // Dividiamo il contenuto HTML in blocchi basandoci sui ritorni a capo
-        val blocks = entryContent?.html()?.split(Regex("(?i)<br\\s*/?>|</p>|</div>|<li>|\\n")) ?: listOf()
-
-        var currentSeason = 1
-        var currentSeasonName = ""
+        val isMovieUrl = url.contains("film") || url.contains("film-animazione")
+        
+        val lines = entryContent?.html()?.split(Regex("<br\\s*/?>|</p>|</div>|<li>|\\n")) ?: listOf()
         var autoEpCounter = 1
 
-        blocks.forEach { blockHtml ->
-            val doc = Jsoup.parseBodyFragment(blockHtml)
-            val text = doc.text().trim()
-            
-            // Trova tutti i link video presenti in questa specifica riga
-            val links = doc.select("a").filter { a ->
+        lines.forEach { line ->
+            val docLine = Jsoup.parseBodyFragment(line)
+            val text = docLine.text().trim()
+            val validLinks = docLine.select("a").filter { a -> 
                 val href = a.attr("href")
-                supportedHosts.any { host -> href.contains(host) }
+                val linkText = a.text().lowercase()
+                href.startsWith("http") && 
+                !href.contains("toonitalia.xyz") && 
+                supportedHosts.any { host -> href.contains(host) || linkText.contains(host) }
             }
 
-            if (links.isEmpty()) {
-                // Se la riga è un titolo (grassetto o header) e non ha link, identifichiamo una nuova stagione
-                if (text.length in 3..70 && !text.contains(Regex("(?i)episodio|link|clicca|streaming"))) {
-                    if (episodes.isNotEmpty()) {
-                        currentSeason++
-                        autoEpCounter = 1 // Reset counter per la nuova parte/stagione
-                    }
-                    currentSeasonName = text
-                }
-            } else {
-                // Estraiamo il numero dell'episodio dal testo, se presente
-                val epMatch = Regex("""\b(\d+)\b""").find(text)
-                val e = epMatch?.groupValues?.get(1)?.toIntOrNull() ?: autoEpCounter
-                
-                // Uniamo i link della stessa riga (es. Voe e Mixdrop dello stesso episodio)
-                val dataUrls = links.map { it.attr("href") }.joinToString("###")
-                
-                var epDisplayName = text.split(Regex("(?i)VOE|Lulu|Vidhide|Mixdrop|Streamtape|Vidoza")).first()
-                    .replace(Regex("""^[-–—\s\d]+|[-–—\s]+$"""), "").trim()
+            if (validLinks.isNotEmpty()) {
+                val isTrailerRow = text.contains(Regex("(?i)sigla|intro|trailer"))
+                val matchSE = Regex("""(\d+)[×x](\d+)""").find(text)
+                val matchSimple = Regex("""^(\d+)""").find(text)
 
-                if (epDisplayName.isEmpty() || epDisplayName.length < 2) {
-                    epDisplayName = "Episodio $e"
+                val s = if (isTrailerRow) 0 else if (isMovieUrl) null else (matchSE?.groupValues?.get(1)?.toIntOrNull() ?: 1)
+                val e = if (isTrailerRow) 0 else if (isMovieUrl) null else (matchSE?.groupValues?.get(2)?.toIntOrNull() ?: matchSimple?.groupValues?.get(1)?.toIntOrNull() ?: autoEpCounter)
+
+                val dataUrls = validLinks.map { it.attr("href") }.joinToString("###")
+                var epName = text.replace(Regex("""^\d+[×x]\d+|^\d+"""), "").replace("–", "").trim()
+                epName = epName.split(Regex("(?i)VOE|LuluStream|Lulu|Streaming|Vidhide|Mixdrop")).first().trim()
+                
+                if (epName.isEmpty() || epName.length < 2) {
+                    epName = if (isMovieUrl) "Film" else "Episodio $e"
                 }
 
                 episodes.add(newEpisode(dataUrls) {
-                    this.name = if (currentSeasonName.isNotEmpty()) "[$currentSeasonName] $epDisplayName" else epDisplayName
-                    this.season = currentSeason
+                    this.name = epName
+                    this.season = s
                     this.episode = e
                     this.posterUrl = poster
                 })
-                
-                autoEpCounter = e + 1
+
+                if (!isMovieUrl && !isTrailerRow) {
+                    if (matchSE == null && matchSimple == null) autoEpCounter++ 
+                    else if (e != null && e >= autoEpCounter) autoEpCounter = e + 1
+                }
             }
         }
 
-        val isMovie = url.contains("film") || (episodes.size == 1 && currentSeason == 1)
-        val finalEpisodes = episodes.distinctBy { it.data + it.name }
-            .sortedWith(compareBy({ it.season ?: 1 }, { it.episode ?: 0 }))
+        val tvType = if (isMovieUrl) TvType.Movie else TvType.TvSeries
+        val finalEpisodes = episodes.distinctBy { it.name + it.episode.toString() + it.season.toString() }
+            .sortedWith(compareBy({ it.season ?: 0 }, { it.episode ?: 0 }))
 
-        return if (isMovie) {
+        return if (tvType == TvType.Movie) {
             newMovieLoadResponse(title, url, TvType.Movie, finalEpisodes.firstOrNull()?.data ?: "") {
                 this.posterUrl = poster
-                this.plot = document.select("div.entry-content p").firstOrNull { it.text().length > 50 }?.text()
+                this.plot = plot
+                this.year = year
+                this.duration = duration
                 this.posterHeaders = commonHeaders
             }
         } else {
-            newTvSeriesLoadResponse(title, url, TvType.TvSeries, finalEpisodes) {
+            newTvSeriesLoadResponse(title, url, tvType, finalEpisodes) {
                 this.posterUrl = poster
-                this.plot = document.select("div.entry-content p").firstOrNull { it.text().length > 50 }?.text()
+                this.plot = plot
+                this.year = year
+                this.duration = duration
                 this.posterHeaders = commonHeaders
             }
         }
