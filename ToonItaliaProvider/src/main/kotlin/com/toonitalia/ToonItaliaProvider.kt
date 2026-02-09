@@ -22,7 +22,7 @@ class ToonItaliaProvider : MainAPI() {
     )
 
     private val supportedHosts = listOf(
-        "voe", "chuckle-tube", "luluvdo", "lulustream", "vidhide", 
+        "voe", "chuckle-tube", "luluvdo", "lulustream", "vidhide",  "rpmshare"
         "mixdrop", "streamtape", "fastream", "filemoon", "wolfstream", "streamwish"
     )
 
@@ -85,7 +85,7 @@ class ToonItaliaProvider : MainAPI() {
 
         val plot = document.select("div.entry-content p")
             .map { it.text() }
-            .firstOrNull { it.length > 60 && !it.contains(Regex("(?i)VOE|Lulu|Vidhide|Mixdrop|Streamtape")) }
+            .firstOrNull { it.length > 60 && !it.contains(Regex("(?i)VOE|Lulu|Vidhide|Mixdrop|Streamtape|RPMShare")) }
 
         val duration = Regex("""(\d+)\s?min""").find(fullText)?.groupValues?.get(1)?.toIntOrNull()
         val year = Regex("""\b(19\d{2}|20[0-2]\d)\b""").find(fullText)?.groupValues?.get(1)?.toIntOrNull()
@@ -117,7 +117,7 @@ class ToonItaliaProvider : MainAPI() {
 
                 val dataUrls = validLinks.map { it.attr("href") }.joinToString("###")
                 var epName = text.replace(Regex("""^\d+[×x]\d+|^\d+"""), "").replace("–", "").trim()
-                epName = epName.split(Regex("(?i)VOE|LuluStream|Lulu|Streaming|Vidhide|Mixdrop")).first().trim()
+                epName = epName.split(Regex("(?i)VOE|LuluStream|Lulu|Streaming|Vidhide|Mixdrop|RPMShare")).first().trim()
                 
                 if (epName.isEmpty() || epName.length < 2) {
                     epName = if (isMovieUrl) "Film" else "Episodio $e"
