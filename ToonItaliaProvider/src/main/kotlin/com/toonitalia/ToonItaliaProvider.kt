@@ -108,7 +108,7 @@ class ToonItaliaProvider : MainAPI() {
             }
 
             if (validLinks.isNotEmpty()) {
-                val isTrailerRow = text.contains(Regex("(?i)sigla|opening|intro|ending|trailer"))
+                val isTrailerRow = text.contains(Regex("(?i)sigla|intro|trailer"))
                 val matchSE = Regex("""(\d+)[×x](\d+)""").find(text)
                 val matchSimple = Regex("""^(\d+)""").find(text)
 
