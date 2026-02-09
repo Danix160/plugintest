@@ -22,7 +22,7 @@ class ToonItaliaProvider : MainAPI() {
     )
 
     private val supportedHosts = listOf(
-        "voe", "chuckle-tube", "luluvdo", "lulustream", "vidhide",  "rpmshare",
+        "voe", "chuckle-tube", "luluvdo", "lulustream", "vidhide", "rpmshare",
         "mixdrop", "streamtape", "fastream", "filemoon", "wolfstream", "streamwish"
     )
 
@@ -85,7 +85,7 @@ class ToonItaliaProvider : MainAPI() {
 
         val plot = document.select("div.entry-content p")
             .map { it.text() }
-            .firstOrNull { it.length > 60 && !it.contains(Regex("(?i)VOE|Lulu|Vidhide|Mixdrop|Streamtape|RPMShare")) }
+            .firstOrNull { it.length > 60 && !it.contains(Regex("(?i)VOE|Lulu|Vidhide|Mixdrop|Streamtape")) }
 
         val duration = Regex("""(\d+)\s?min""").find(fullText)?.groupValues?.get(1)?.toIntOrNull()
         val year = Regex("""\b(19\d{2}|20[0-2]\d)\b""").find(fullText)?.groupValues?.get(1)?.toIntOrNull()
@@ -105,19 +105,6 @@ class ToonItaliaProvider : MainAPI() {
                 href.startsWith("http") && 
                 !href.contains("toonitalia.xyz") && 
                 supportedHosts.any { host -> href.contains(host) || linkText.contains(host) }
-            }
-            // --- RILEVAMENTO CAMBIO STAGIONE (DISK / VOLUME / PARTE) ---
-            if (validLinks.isEmpty() && text.length > 3 && !isMovieUrl) {
-                // Se la riga contiene parole come Disk, Volume, Parte o Stagione
-                val seasonKeywords = Regex("(?i)disk|volume|stagione|serie|saga|\\b\\d+°\\b")
-                if (seasonKeywords.containsMatchIn(text)) {
-                    // Incrementiamo la stagione solo se abbiamo già aggiunto episodi nella stagione precedente
-                    if (episodes.isNotEmpty()) {
-                        currentSeason++
-                        autoEpCounter = 1 // Resetta il conteggio episodi per il nuovo disco
-                    }
-                }
-                return@forEach
             }
 
             if (validLinks.isNotEmpty()) {
