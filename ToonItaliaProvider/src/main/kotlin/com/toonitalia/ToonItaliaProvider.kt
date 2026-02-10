@@ -6,7 +6,8 @@ import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.MainAPI
 import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
-import com.lagradost.cloudstream3.metadataproviders.TmdbProvider // Import per TMDB
+// Importiamo le utilità per TMDB correttamente
+import com.lagradost.cloudstream3.syncproviders.SyncIdName
 import org.jsoup.Jsoup
 
 class ToonItaliaProvider : MainAPI() {
@@ -15,9 +16,6 @@ class ToonItaliaProvider : MainAPI() {
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime, TvType.Cartoon)
     override var lang = "it"
     override val hasMainPage = true
-
-    // Inizializziamo il provider TMDB interno di Cloudstream
-    private val tmdb = TmdbProvider()
 
     private val searchPlaceholderLogo = "https://toonitalia.xyz/wp-content/uploads/2023/11/toonitalia-logo-1.png"
 
@@ -48,24 +46,18 @@ class ToonItaliaProvider : MainAPI() {
         return title.replace(Regex("(?i)streaming|sub\\s?ita|serie\\s?tv|film|animazione|ita"), "").trim()
     }
 
-    // Helper per cercare su TMDB senza crashare se non trova nulla
-    private suspend fun getTmdbDetails(title: String): SearchResponse? {
-        return try {
-            tmdb.search(cleanTitle(title))?.firstOrNull()
-        } catch (e: Exception) {
-            null
-        }
-    }
-
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get(request.data, headers = commonHeaders).document
         val items = document.select("article").mapNotNull { article ->
             val titleHeader = article.selectFirst("h2.entry-title a") ?: return@mapNotNull null
             val title = titleHeader.text()
             val href = titleHeader.attr("href")
+            
+            // Eseguiamo la ricerca TMDB FUORI dal blocco di risposta per evitare l'errore "Suspension functions"
+            val tmdbPoster = searchTMDB(cleanTitle(title)).firstOrNull()?.posterPath
 
             newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
-                this.posterUrl = getTmdbDetails(title)?.posterPath ?: searchPlaceholderLogo
+                this.posterUrl = tmdbPoster ?: searchPlaceholderLogo
                 this.posterHeaders = commonHeaders
             }
         }
@@ -81,8 +73,11 @@ class ToonItaliaProvider : MainAPI() {
             val title = titleHeader.text()
             val href = titleHeader.attr("href")
 
+            // Eseguiamo la ricerca TMDB prima di creare l'oggetto risposta
+            val tmdbPoster = searchTMDB(cleanTitle(title)).firstOrNull()?.posterPath
+
             newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
-                this.posterUrl = getTmdbDetails(title)?.posterPath ?: searchPlaceholderLogo
+                this.posterUrl = tmdbPoster ?: searchPlaceholderLogo
                 this.posterHeaders = commonHeaders
             }
         }
@@ -94,12 +89,13 @@ class ToonItaliaProvider : MainAPI() {
         val rawTitle = document.selectFirst("h1.entry-title")?.text() ?: ""
         val title = rawTitle.replace(Regex("(?i)streaming|sub\\s?ita"), "").trim()
         
-        val tmdbResult = getTmdbDetails(title)
+        // Cerchiamo i dettagli TMDB
+        val tmdbResult = searchTMDB(cleanTitle(title)).firstOrNull()
+        val poster = tmdbResult?.posterPath ?: searchPlaceholderLogo
 
         val entryContent = document.selectFirst("div.entry-content")
         val fullText = entryContent?.text() ?: ""
 
-        // Fallback logica per trama, durata e anno
         val plot = document.select("div.entry-content p")
             .map { it.text() }
             .firstOrNull { it.length > 60 && !it.contains(Regex("(?i)VOE|Lulu|Vidhide|Mixdrop|Streamtape")) }
@@ -143,7 +139,7 @@ class ToonItaliaProvider : MainAPI() {
                     this.name = epName
                     this.season = s
                     this.episode = e
-                    this.posterUrl = tmdbResult?.posterPath ?: searchPlaceholderLogo
+                    this.posterUrl = poster
                 })
 
                 if (!isMovieUrl && !isTrailerRow) {
@@ -157,15 +153,15 @@ class ToonItaliaProvider : MainAPI() {
 
         return if (tvType == TvType.Movie) {
             newMovieLoadResponse(title, url, TvType.Movie, finalEpisodes.firstOrNull()?.data ?: "") {
-                this.posterUrl = tmdbResult?.posterPath ?: searchPlaceholderLogo
-                this.plot = tmdbResult?.name ?: plot // TMDB non ha 'description' diretto qui, usiamo il nome o il plot locale
+                this.posterUrl = poster
+                this.plot = tmdbResult?.description ?: plot
                 this.year = yearMatch
                 this.duration = durationMatch
                 this.posterHeaders = commonHeaders
             }
         } else {
             newTvSeriesLoadResponse(title, url, tvType, finalEpisodes) {
-                this.posterUrl = tmdbResult?.posterPath ?: searchPlaceholderLogo
+                this.posterUrl = poster
                 this.plot = plot
                 this.year = yearMatch
                 this.duration = durationMatch
