@@ -2,6 +2,10 @@
 
 Contiene per il momento il sito ToonItalia dove si possono trovare centinaia di Film, Serie e Cartoni(Nuovi e Vecchi)
 
+Clicca su Gumball per installare la repo 
+<p align="center">
+  <img alt="alt_text" width="200px" src="gum.png"/>
+</p>
 Danix : 
 https://raw.githubusercontent.com/Danix160/plugintest/builds/repo.json
 
