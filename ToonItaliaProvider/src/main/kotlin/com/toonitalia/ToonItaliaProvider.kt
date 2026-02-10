@@ -5,7 +5,7 @@ import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.MainAPI
 import com.lagradost.cloudstream3.TvType
-import com.lagradost.cloudstream3.SearchResponse
+import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import org.jsoup.Jsoup
 
 class ToonItaliaProvider : MainAPI() {
@@ -40,40 +40,23 @@ class ToonItaliaProvider : MainAPI() {
             .replace("luluvideo.com", "lulustream.com")
     }
 
-    private fun cleanTitle(title: String): String {
-        return title.replace(Regex("(?i)streaming|sub\\s?ita|serie\\s?tv|film|animazione|ita"), "").trim()
-    }
-
-    // NUOVA LOGICA: Chiamata manuale a TMDB (Zero errori di compilazione)
-    private suspend fun getPosterFromTMDB(title: String): String? {
-        return try {
-            val query = cleanTitle(title).replace(" ", "+")
-            // Usiamo l'API pubblica di TMDB (API Key di default di Cloudstream o comune)
-            val apiUrl = "https://api.themoviedb.org/3/search/multi?api_key=a9ddc3042079f82d09b68a6d9b4b09e2&query=$query&language=it-IT"
-            val response = app.get(apiUrl).text
-            
-            // Estrazione manuale della stringa poster_path per evitare problemi con librerie JSON
-            val posterPath = Regex("""\"poster_path\":\"\\/(.*?)\"""").find(response)?.groupValues?.get(1)
-            if (posterPath != null) "https://image.tmdb.org/t/p/w500/$posterPath" else null
-        } catch (e: Exception) {
-            null
-        }
-    }
-
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get(request.data, headers = commonHeaders).document
-        val items = document.select("article").mapNotNull { article ->
-            val titleHeader = article.selectFirst("h2.entry-title a") ?: return@mapNotNull null
-            val title = titleHeader.text()
+        // Usiamo amap per caricare i poster reali anche nella home
+        val items = document.select("article").amap { article ->
+            val titleHeader = article.selectFirst("h2.entry-title a") ?: return@amap null
             val href = titleHeader.attr("href")
             
-            val poster = getPosterFromTMDB(title)
+            // Carica la pagina interna per il poster
+            val innerPage = app.get(href, headers = commonHeaders).document
+            val posterUrl = innerPage.selectFirst("img.attachment-post-thumbnail, .post-thumbnail img, .entry-content img")?.attr("src")
 
-            newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
-                this.posterUrl = poster ?: searchPlaceholderLogo
+            newTvSeriesSearchResponse(titleHeader.text(), href, TvType.TvSeries) {
+                this.posterUrl = posterUrl ?: searchPlaceholderLogo
                 this.posterHeaders = commonHeaders
             }
-        }
+        }.filterNotNull()
+        
         return newHomePageResponse(request.name, items)
     }
 
@@ -81,27 +64,31 @@ class ToonItaliaProvider : MainAPI() {
         val url = "$mainUrl/?s=$query"
         val document = app.get(url, headers = commonHeaders).document
         
-        return document.select("article").mapNotNull { article ->
-            val titleHeader = article.selectFirst("h2.entry-title a") ?: return@mapNotNull null
+        // amap è fondamentale qui: esegue le richieste in parallelo
+        return document.select("article").amap { article ->
+            val titleHeader = article.selectFirst("h2.entry-title a") ?: return@amap null
             val title = titleHeader.text()
             val href = titleHeader.attr("href")
 
-            val poster = getPosterFromTMDB(title)
+            // Entriamo nella pagina per recuperare il poster che manca nella ricerca
+            val innerPage = app.get(href, headers = commonHeaders).document
+            val posterUrl = innerPage.selectFirst("img.attachment-post-thumbnail, .post-thumbnail img, .entry-content img")?.attr("src")
+                ?: innerPage.selectFirst("meta[property=\"og:image\"]")?.attr("content")
 
             newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
-                this.posterUrl = poster ?: searchPlaceholderLogo
+                this.posterUrl = posterUrl ?: searchPlaceholderLogo
                 this.posterHeaders = commonHeaders
             }
-        }
+        }.filterNotNull()
     }
 
     override suspend fun load(url: String): LoadResponse {
         val response = app.get(url, headers = commonHeaders)
         val document = response.document
-        val rawTitle = document.selectFirst("h1.entry-title")?.text() ?: ""
-        val title = rawTitle.replace(Regex("(?i)streaming|sub\\s?ita"), "").trim()
+        val title = document.selectFirst("h1.entry-title")?.text()?.replace(Regex("(?i)streaming|sub\\s?ita"), "")?.trim() ?: ""
         
-        val poster = getPosterFromTMDB(title) ?: searchPlaceholderLogo
+        val poster = document.selectFirst("img.attachment-post-thumbnail, .post-thumbnail img, .entry-content img")?.attr("src")
+            ?: searchPlaceholderLogo
 
         val entryContent = document.selectFirst("div.entry-content")
         val fullText = entryContent?.text() ?: ""
@@ -110,8 +97,8 @@ class ToonItaliaProvider : MainAPI() {
             .map { it.text() }
             .firstOrNull { it.length > 60 && !it.contains(Regex("(?i)VOE|Lulu|Vidhide|Mixdrop|Streamtape")) }
 
-        val yearMatch = Regex("""\b(19\d{2}|20[0-2]\d)\b""").find(fullText)?.groupValues?.get(1)?.toIntOrNull()
-        val durationMatch = Regex("""(\d+)\s?min""").find(fullText)?.groupValues?.get(1)?.toIntOrNull()
+        val duration = Regex("""(\d+)\s?min""").find(fullText)?.groupValues?.get(1)?.toIntOrNull()
+        val year = Regex("""\b(19\d{2}|20[0-2]\d)\b""").find(fullText)?.groupValues?.get(1)?.toIntOrNull()
 
         val episodes = mutableListOf<Episode>()
         val isMovieUrl = url.contains("film") || url.contains("film-animazione")
@@ -165,16 +152,16 @@ class ToonItaliaProvider : MainAPI() {
             newMovieLoadResponse(title, url, TvType.Movie, finalEpisodes.firstOrNull()?.data ?: "") {
                 this.posterUrl = poster
                 this.plot = plot
-                this.year = yearMatch
-                this.duration = durationMatch
+                this.year = year
+                this.duration = duration
                 this.posterHeaders = commonHeaders
             }
         } else {
             newTvSeriesLoadResponse(title, url, tvType, finalEpisodes) {
                 this.posterUrl = poster
                 this.plot = plot
-                this.year = yearMatch
-                this.duration = durationMatch
+                this.year = year
+                this.duration = duration
                 this.posterHeaders = commonHeaders
             }
         }
