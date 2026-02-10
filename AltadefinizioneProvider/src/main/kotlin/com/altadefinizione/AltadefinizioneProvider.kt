@@ -5,7 +5,7 @@ import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.*
 import org.jsoup.nodes.Element
 
-class AltaDefinizioneProvider : MainAPI() {
+class AltadefinizioneProvider : MainAPI() {
     override var mainUrl = "https://altadefinizionez.sbs"
     override var name = "Altadefinizione"
     override val hasMainPage = true
