@@ -1,5 +1,25 @@
 [
     {
+        "iconUrl": "https://altadefinizionez.sbs/templates/Alta/images/favicon/apple-touch-icon.png",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/Danix160/plugintest",
+        "fileSize": 10714,
+        "status": 1,
+        "language": "it",
+        "authors": [
+            "Danix"
+        ],
+        "tvTypes": [
+            "Movie",
+            "TvSeries"
+        ],
+        "version": 1,
+        "internalName": "AltadefinizioneProvider",
+        "description": "Altadefinizionez.sbs",
+        "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/AltadefinizioneProvider.cs3",
+        "name": "AltadefinizioneProvider"
+    },
+    {
         "iconUrl": "https://toonitalia.xyz/wp-content/uploads/2023/08/cropped-Majintoon-192x192.jpg",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/Danix160/plugintest",
