@@ -8,7 +8,7 @@ Contiene per il momento il sito ToonItalia dove si possono trovare centinaia di 
     <img src="https://raw.githubusercontent.com/Danix160/plugintest/master/gum.png" alt="Installa Repository" width="170">
   </a>
   <br>
-  <b><a href="cloudstreamrepo://raw.githubusercontent.com/Danix160/plugintest/builds/repo.json">👉 CLICCA QUI PER INSTALLARE 👈</a></b>
+  <b><a href="https://danix160.github.io/plugintest/install.html">👉 CLICCA QUI PER INSTALLARE, SE L'IMMAGINE NON DOVESSE FUNZIONARE 👈</a></b>
 </p>
 
 ---
