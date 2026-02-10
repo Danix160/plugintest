@@ -4,10 +4,17 @@ Contiene per il momento il sito ToonItalia dove si possono trovare centinaia di 
 
 ### Clicca su Gumball per installare la repo
 <p align="center">
-  <a href="https://cs.repo.li/?repo=https://raw.githubusercontent.com/Danix160/plugintest/builds/repo.json">
-    <img src="https://raw.githubusercontent.com/Danix160/plugintest/master/gum.png" alt="Installa Repository" width="170"/>
+  <a href="cloudstream-repo://https://raw.githubusercontent.com/Danix160/plugintest/builds/plugins.json">
+    <img src="https://raw.githubusercontent.com/Danix160/plugintest/master/gum.png" alt="Installa Repository" width="170">
+  </a>
+  <br>
+  <a href="cloudstream-repo://https://raw.githubusercontent.com/Danix160/plugintest/builds/plugins.json">
+    <b>👉 CLICCA QUI PER INSTALLARE AUTOMATICAMENTE 👈</b>
   </a>
 </p>
 
-**Link da copiare manualmente:**
-`https://raw.githubusercontent.com/Danix160/plugintest/builds/repo.json`
+---
+
+### Istruzioni Manuali
+Se il tasto sopra non funziona, copia e incolla questo link nelle impostazioni di Cloudstream:
+`https://raw.githubusercontent.com/Danix160/plugintest/builds/plugins.json`
