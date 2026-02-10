@@ -9,11 +9,11 @@ android {
 
 cloudstream {
     // Configurazione diretta (più sicura)
-    prefix = "Altadefinizione"
-    displayName = "Altadefinizione"
+    extra["prefix"] = "Altadefinizione"
+    extra["displayName"] = "Altadefinizione"
     
     // Si usa versionCode invece di version
-    versionCode = 1
+    version = 1
     description = "Altadefinizionez.sbs"
     authors = listOf("Danix")
     
