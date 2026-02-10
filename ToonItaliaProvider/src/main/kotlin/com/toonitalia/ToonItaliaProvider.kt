@@ -5,8 +5,8 @@ import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.MainAPI
 import com.lagradost.cloudstream3.TvType
-import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import org.jsoup.Jsoup
+import org.jsoup.nodes.Document
 
 class ToonItaliaProvider : MainAPI() {
     override var mainUrl = "https://toonitalia.xyz"
@@ -40,37 +40,42 @@ class ToonItaliaProvider : MainAPI() {
             .replace("luluvideo.com", "lulustream.com")
     }
 
+    // --- HOME PAGE (OTTIMIZZATA: VELOCE) ---
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val document = app.get(request.data, headers = commonHeaders).document
-        // Usiamo amap per caricare i poster reali anche nella home
-        val items = document.select("article").amap { article ->
-            val titleHeader = article.selectFirst("h2.entry-title a") ?: return@amap null
+        val url = if (page <= 1) request.data else "${request.data}/page/$page/"
+        val document = app.get(url, headers = commonHeaders, timeout = 10).document
+        
+        // Usiamo mapNotNull: nessuna richiesta extra per ogni film
+        val items = document.select("article").mapNotNull { article ->
+            val titleHeader = article.selectFirst("h2.entry-title a") ?: return@mapNotNull null
             val href = titleHeader.attr("href")
             
-            // Carica la pagina interna per il poster
-            val innerPage = app.get(href, headers = commonHeaders).document
-            val posterUrl = innerPage.selectFirst("img.attachment-post-thumbnail, .post-thumbnail img, .entry-content img")?.attr("src")
+            // Recupera il poster direttamente dall'HTML della home (thumbnail)
+            val posterUrl = article.selectFirst("img")?.attr("src") 
+                ?: article.selectFirst("img")?.attr("data-src")
+                ?: searchPlaceholderLogo
 
             newTvSeriesSearchResponse(titleHeader.text(), href, TvType.TvSeries) {
-                this.posterUrl = posterUrl ?: searchPlaceholderLogo
+                this.posterUrl = posterUrl
                 this.posterHeaders = commonHeaders
             }
-        }.filterNotNull()
+        }
         
         return newHomePageResponse(request.name, items)
     }
 
+    // --- SEARCH (DETTAGLIATA: USA AMAP) ---
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/?s=$query"
         val document = app.get(url, headers = commonHeaders).document
         
-        // amap è fondamentale qui: esegue le richieste in parallelo
+        // amap: apre ogni risultato in parallelo per prendere il poster HQ
         return document.select("article").amap { article ->
             val titleHeader = article.selectFirst("h2.entry-title a") ?: return@amap null
             val title = titleHeader.text()
             val href = titleHeader.attr("href")
 
-            // Entriamo nella pagina per recuperare il poster che manca nella ricerca
+            // Richiesta extra solo in ricerca per avere poster corretti
             val innerPage = app.get(href, headers = commonHeaders).document
             val posterUrl = innerPage.selectFirst("img.attachment-post-thumbnail, .post-thumbnail img, .entry-content img")?.attr("src")
                 ?: innerPage.selectFirst("meta[property=\"og:image\"]")?.attr("content")
@@ -170,7 +175,7 @@ class ToonItaliaProvider : MainAPI() {
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
-        subtitleCallback: (SubtitleFile) -> Unit,
+        subtitleCallback: (com.lagradost.cloudstream3.SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         data.split("###").forEach { url ->
