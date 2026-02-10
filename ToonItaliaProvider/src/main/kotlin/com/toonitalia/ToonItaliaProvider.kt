@@ -5,6 +5,7 @@ import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.MainAPI
 import com.lagradost.cloudstream3.TvType
+import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import org.jsoup.Jsoup
 
 class ToonItaliaProvider : MainAPI() {
@@ -39,17 +40,21 @@ class ToonItaliaProvider : MainAPI() {
             .replace("luluvideo.com", "lulustream.com")
     }
 
+    // Pulisce il titolo per migliorare i risultati su TMDB
+    private fun cleanTitle(title: String): String {
+        return title.replace(Regex("(?i)streaming|sub\\s?ita|serie\\s?tv|film|animazione|ita"), "").trim()
+    }
+
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get(request.data, headers = commonHeaders).document
         val items = document.select("article").mapNotNull { article ->
             val titleHeader = article.selectFirst("h2.entry-title a") ?: return@mapNotNull null
-            val img = article.selectFirst("img")
-            val posterUrl = img?.attr("data-src")?.takeIf { it.isNotBlank() } 
-                ?: img?.attr("data-lazy-src")?.takeIf { it.isNotBlank() } 
-                ?: img?.attr("src")
+            val title = titleHeader.text()
+            val href = titleHeader.attr("href")
 
-            newTvSeriesSearchResponse(titleHeader.text(), titleHeader.attr("href"), TvType.TvSeries) {
-                this.posterUrl = posterUrl
+            newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
+                // Cerchiamo il poster su TMDB per la home page
+                this.posterUrl = searchTMDB(cleanTitle(title)).firstOrNull()?.posterPath ?: searchPlaceholderLogo
                 this.posterHeaders = commonHeaders
             }
         }
@@ -59,10 +64,16 @@ class ToonItaliaProvider : MainAPI() {
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/?s=$query"
         val document = app.get(url, headers = commonHeaders).document
+        
         return document.select("article").mapNotNull { article ->
             val titleHeader = article.selectFirst("h2.entry-title a") ?: return@mapNotNull null
-            newTvSeriesSearchResponse(titleHeader.text(), titleHeader.attr("href"), TvType.TvSeries) {
-                this.posterUrl = searchPlaceholderLogo
+            val title = titleHeader.text()
+            val href = titleHeader.attr("href")
+
+            newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
+                // TMDB fornisce il poster che manca nell'HTML di ricerca di ToonItalia
+                val tmdbMatch = searchTMDB(cleanTitle(title)).firstOrNull()
+                this.posterUrl = tmdbMatch?.posterPath ?: searchPlaceholderLogo
                 this.posterHeaders = commonHeaders
             }
         }
@@ -71,30 +82,28 @@ class ToonItaliaProvider : MainAPI() {
     override suspend fun load(url: String): LoadResponse {
         val response = app.get(url, headers = commonHeaders)
         val document = response.document
-        val title = document.selectFirst("h1.entry-title")?.text()?.replace(Regex("(?i)streaming|sub\\s?ita"), "")?.trim() ?: ""
+        val rawTitle = document.selectFirst("h1.entry-title")?.text() ?: ""
+        val title = rawTitle.replace(Regex("(?i)streaming|sub\\s?ita"), "").trim()
         
-        val img = document.selectFirst("div.entry-content img, .post-thumbnail img")
-        val poster = img?.attr("data-src")?.takeIf { it.isNotBlank() } 
-            ?: img?.attr("data-lazy-src")?.takeIf { it.isNotBlank() }
-            ?: img?.attr("src")?.takeIf { it.isNotBlank() && !it.contains("placeholder") }
-            ?: searchPlaceholderLogo
+        // Recuperiamo dati extra da TMDB per arricchire la scheda
+        val tmdbResult = searchTMDB(cleanTitle(title)).firstOrNull()
 
         val entryContent = document.selectFirst("div.entry-content")
         val fullText = entryContent?.text() ?: ""
 
-        val plot = document.select("div.entry-content p")
+        // Fallback: se TMDB non ha la trama, proviamo a estrarla dal sito
+        val plot = tmdbResult?.description ?: document.select("div.entry-content p")
             .map { it.text() }
             .firstOrNull { it.length > 60 && !it.contains(Regex("(?i)VOE|Lulu|Vidhide|Mixdrop|Streamtape")) }
 
-        val duration = Regex("""(\d+)\s?min""").find(fullText)?.groupValues?.get(1)?.toIntOrNull()
-        val year = Regex("""\b(19\d{2}|20[0-2]\d)\b""").find(fullText)?.groupValues?.get(1)?.toIntOrNull()
+        val duration = tmdbResult?.runtime ?: Regex("""(\d+)\s?min""").find(fullText)?.groupValues?.get(1)?.toIntOrNull()
+        val year = tmdbResult?.year ?: Regex("""\b(19\d{2}|20[0-2]\d)\b""").find(fullText)?.groupValues?.get(1)?.toIntOrNull()
+        val poster = tmdbResult?.posterPath ?: searchPlaceholderLogo
 
         val episodes = mutableListOf<Episode>()
         val isMovieUrl = url.contains("film") || url.contains("film-animazione")
         
         val lines = entryContent?.html()?.split(Regex("<br\\s*/?>|</p>|</div>|<li>|\\n")) ?: listOf()
-        
-        // Contatore progressivo per distinguere i segmenti A e B come episodi separati
         var absoluteEpCounter = 1
 
         lines.forEach { line ->
@@ -113,15 +122,10 @@ class ToonItaliaProvider : MainAPI() {
                 val isTrailerRow = text.contains(Regex("(?i)sigla|intro|trailer"))
                 val matchSE = Regex("""(\d+)[×x](\d+)""").find(text)
 
-                // Gestione stagione
                 val s = if (isTrailerRow) 0 else if (isMovieUrl) null else (matchSE?.groupValues?.get(1)?.toIntOrNull() ?: 1)
-                
-                // Usiamo il contatore assoluto per forzare Cloudstream a mostrare ogni riga (A, B, ecc.)
                 val e = if (isTrailerRow) 0 else if (isMovieUrl) null else absoluteEpCounter
 
                 val dataUrls = validLinks.map { it.attr("href") }.joinToString("###")
-                
-                // Pulizia del nome mantenendo il testo originale (che contiene 1x01A, 1x01B, ecc.)
                 var epName = text.split(Regex("(?i)VOE|LuluStream|Lulu|Streaming|Vidhide|Mixdrop|RPMShare")).first().trim()
                 
                 if (epName.isEmpty() || epName.length < 2) {
@@ -142,8 +146,6 @@ class ToonItaliaProvider : MainAPI() {
         }
 
         val tvType = if (isMovieUrl) TvType.Movie else TvType.TvSeries
-        
-        // Ordiniamo per il contatore assoluto assegnato
         val finalEpisodes = episodes.sortedWith(compareBy({ it.season ?: 0 }, { it.episode ?: 0 }))
 
         return if (tvType == TvType.Movie) {
