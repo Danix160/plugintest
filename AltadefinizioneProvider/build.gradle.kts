@@ -8,16 +8,16 @@ android {
     }
 }
 cloudstream {
-    extra["prefix"] = "AltaDefinizione"
-    extra["displayName"] = "AltaDefinizione"
+    extra["prefix"] = "Altadefinizione"
+    extra["displayName"] = "Altadefinizione"
     
     version = 1
-    description = "AltaDefinizionez"
+    description = "Altadefinzionez.sbs"
     authors = listOf("Danix")
     
     status = 1
     tvTypes = listOf("Movie", "TvSeries")
     requiresResources = false
     language = "it"
-    iconUrl = ""
+    iconUrl = "https://toonitalia.xyz/wp-content/uploads/2023/08/cropped-Majintoon-192x192.jpg"
 }
