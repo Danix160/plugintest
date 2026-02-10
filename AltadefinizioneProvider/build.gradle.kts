@@ -16,7 +16,7 @@ cloudstream {
     authors = listOf("Danix")
     
     status = 1
-    tvTypes = list0f("Movie", "TvSeries")
+    tvTypes = listOf("Movie", "TvSeries")
     requiresResources = false
     language = "it"
     iconUrl = ""
