@@ -1,23 +1,29 @@
 android {
-    // ... altre configurazioni (compileSdk, ecc.) ...
-
+    // Mantieni le tue configurazioni compileSdk ecc. qui sopra
+    
     kotlinOptions {
         jvmTarget = "1.8"
-        // Questa riga dice al compilatore di ignorare che la libreria è "troppo nuova"
         freeCompilerArgs = freeCompilerArgs + "-Xskip-metadata-version-check"
     }
 }
+
 cloudstream {
-    extra["prefix"] = "Altadefinizione"
-    extra["displayName"] = "Altadefinizione"
+    // Configurazione diretta (più sicura)
+    prefix = "Altadefinizione"
+    displayName = "Altadefinizione"
     
-    version = 1
-    description = "Altadefinzionez.sbs"
+    // Si usa versionCode invece di version
+    versionCode = 1
+    description = "Altadefinizionez.sbs"
     authors = listOf("Danix")
     
     status = 1
+    // Assicurati che listOf sia scritto con la 'o' e non con lo '0'
     tvTypes = listOf("Movie", "TvSeries")
+    
     requiresResources = false
     language = "it"
-    iconUrl = "https://toonitalia.xyz/wp-content/uploads/2023/08/cropped-Majintoon-192x192.jpg"
+    // Ho rimosso l'icona di ToonItalia per Altadefinizione, 
+    // puoi metterne una specifica o lasciarla vuota ""
+    iconUrl = "https://altadefinizionez.sbs/templates/Alta/images/favicon/apple-touch-icon.png"
 }
