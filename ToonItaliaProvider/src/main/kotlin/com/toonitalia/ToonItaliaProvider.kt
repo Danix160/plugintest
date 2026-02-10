@@ -79,7 +79,6 @@ class ToonItaliaProvider : MainAPI() {
             ?: img?.attr("src")?.takeIf { it.isNotBlank() && !it.contains("placeholder") }
             ?: searchPlaceholderLogo
 
-        // --- ESTRAZIONE TRAMA, DURATA E ANNO ---
         val entryContent = document.selectFirst("div.entry-content")
         val fullText = entryContent?.text() ?: ""
 
@@ -94,11 +93,14 @@ class ToonItaliaProvider : MainAPI() {
         val isMovieUrl = url.contains("film") || url.contains("film-animazione")
         
         val lines = entryContent?.html()?.split(Regex("<br\\s*/?>|</p>|</div>|<li>|\\n")) ?: listOf()
-        var autoEpCounter = 1
+        
+        // Contatore progressivo per distinguere i segmenti A e B come episodi separati
+        var absoluteEpCounter = 1
 
         lines.forEach { line ->
             val docLine = Jsoup.parseBodyFragment(line)
             val text = docLine.text().trim()
+            
             val validLinks = docLine.select("a").filter { a -> 
                 val href = a.attr("href")
                 val linkText = a.text().lowercase()
@@ -110,17 +112,20 @@ class ToonItaliaProvider : MainAPI() {
             if (validLinks.isNotEmpty()) {
                 val isTrailerRow = text.contains(Regex("(?i)sigla|intro|trailer"))
                 val matchSE = Regex("""(\d+)[×x](\d+)""").find(text)
-                val matchSimple = Regex("""^(\d+)""").find(text)
 
+                // Gestione stagione
                 val s = if (isTrailerRow) 0 else if (isMovieUrl) null else (matchSE?.groupValues?.get(1)?.toIntOrNull() ?: 1)
-                val e = if (isTrailerRow) 0 else if (isMovieUrl) null else (matchSE?.groupValues?.get(2)?.toIntOrNull() ?: matchSimple?.groupValues?.get(1)?.toIntOrNull() ?: autoEpCounter)
+                
+                // Usiamo il contatore assoluto per forzare Cloudstream a mostrare ogni riga (A, B, ecc.)
+                val e = if (isTrailerRow) 0 else if (isMovieUrl) null else absoluteEpCounter
 
                 val dataUrls = validLinks.map { it.attr("href") }.joinToString("###")
-                var epName = text.replace(Regex("""^\d+[×x]\d+|^\d+"""), "").replace("–", "").trim()
-                epName = epName.split(Regex("(?i)VOE|LuluStream|Lulu|Streaming|Vidhide|Mixdrop|RPMShare")).first().trim()
+                
+                // Pulizia del nome mantenendo il testo originale (che contiene 1x01A, 1x01B, ecc.)
+                var epName = text.split(Regex("(?i)VOE|LuluStream|Lulu|Streaming|Vidhide|Mixdrop|RPMShare")).first().trim()
                 
                 if (epName.isEmpty() || epName.length < 2) {
-                    epName = if (isMovieUrl) "Film" else "Episodio $e"
+                    epName = if (isMovieUrl) "Film" else "Episodio $absoluteEpCounter"
                 }
 
                 episodes.add(newEpisode(dataUrls) {
@@ -131,15 +136,15 @@ class ToonItaliaProvider : MainAPI() {
                 })
 
                 if (!isMovieUrl && !isTrailerRow) {
-                    if (matchSE == null && matchSimple == null) autoEpCounter++ 
-                    else if (e != null && e >= autoEpCounter) autoEpCounter = e + 1
+                    absoluteEpCounter++ 
                 }
             }
         }
 
         val tvType = if (isMovieUrl) TvType.Movie else TvType.TvSeries
-        val finalEpisodes = episodes.distinctBy { it.name + it.episode.toString() + it.season.toString() }
-            .sortedWith(compareBy({ it.season ?: 0 }, { it.episode ?: 0 }))
+        
+        // Ordiniamo per il contatore assoluto assegnato
+        val finalEpisodes = episodes.sortedWith(compareBy({ it.season ?: 0 }, { it.episode ?: 0 }))
 
         return if (tvType == TvType.Movie) {
             newMovieLoadResponse(title, url, TvType.Movie, finalEpisodes.firstOrNull()?.data ?: "") {
