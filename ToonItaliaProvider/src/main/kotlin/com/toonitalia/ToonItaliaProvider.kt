@@ -5,9 +5,11 @@ import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.MainAPI
 import com.lagradost.cloudstream3.TvType
+import com.lagradost.cloudstream3.SearchResponse
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
-// Importiamo le utilità per TMDB correttamente
+// Import fondamentale per le estensioni TMDB
 import com.lagradost.cloudstream3.syncproviders.SyncIdName
+import com.lagradost.cloudstream3.MainAPIKt.searchTMDB
 import org.jsoup.Jsoup
 
 class ToonItaliaProvider : MainAPI() {
@@ -46,6 +48,17 @@ class ToonItaliaProvider : MainAPI() {
         return title.replace(Regex("(?i)streaming|sub\\s?ita|serie\\s?tv|film|animazione|ita"), "").trim()
     }
 
+    // Helper interno per evitare errori di riferimento
+    private suspend fun getPosterFromTMDB(title: String): String? {
+        return try {
+            // Usiamo il metodo corretto del framework
+            val search = searchTMDB(cleanTitle(title))
+            search.firstOrNull()?.posterPath
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get(request.data, headers = commonHeaders).document
         val items = document.select("article").mapNotNull { article ->
@@ -53,11 +66,10 @@ class ToonItaliaProvider : MainAPI() {
             val title = titleHeader.text()
             val href = titleHeader.attr("href")
             
-            // Eseguiamo la ricerca TMDB FUORI dal blocco di risposta per evitare l'errore "Suspension functions"
-            val tmdbPoster = searchTMDB(cleanTitle(title)).firstOrNull()?.posterPath
+            val poster = getPosterFromTMDB(title)
 
             newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
-                this.posterUrl = tmdbPoster ?: searchPlaceholderLogo
+                this.posterUrl = poster ?: searchPlaceholderLogo
                 this.posterHeaders = commonHeaders
             }
         }
@@ -73,11 +85,10 @@ class ToonItaliaProvider : MainAPI() {
             val title = titleHeader.text()
             val href = titleHeader.attr("href")
 
-            // Eseguiamo la ricerca TMDB prima di creare l'oggetto risposta
-            val tmdbPoster = searchTMDB(cleanTitle(title)).firstOrNull()?.posterPath
+            val poster = getPosterFromTMDB(title)
 
             newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
-                this.posterUrl = tmdbPoster ?: searchPlaceholderLogo
+                this.posterUrl = poster ?: searchPlaceholderLogo
                 this.posterHeaders = commonHeaders
             }
         }
@@ -89,8 +100,8 @@ class ToonItaliaProvider : MainAPI() {
         val rawTitle = document.selectFirst("h1.entry-title")?.text() ?: ""
         val title = rawTitle.replace(Regex("(?i)streaming|sub\\s?ita"), "").trim()
         
-        // Cerchiamo i dettagli TMDB
-        val tmdbResult = searchTMDB(cleanTitle(title)).firstOrNull()
+        // Cerchiamo i dettagli TMDB per il caricamento
+        val tmdbResult = try { searchTMDB(cleanTitle(title)).firstOrNull() } catch(e: Exception) { null }
         val poster = tmdbResult?.posterPath ?: searchPlaceholderLogo
 
         val entryContent = document.selectFirst("div.entry-content")
@@ -154,7 +165,7 @@ class ToonItaliaProvider : MainAPI() {
         return if (tvType == TvType.Movie) {
             newMovieLoadResponse(title, url, TvType.Movie, finalEpisodes.firstOrNull()?.data ?: "") {
                 this.posterUrl = poster
-                this.plot = tmdbResult?.description ?: plot
+                this.plot = plot
                 this.year = yearMatch
                 this.duration = durationMatch
                 this.posterHeaders = commonHeaders
