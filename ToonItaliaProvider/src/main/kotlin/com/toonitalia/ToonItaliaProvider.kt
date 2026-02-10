@@ -6,10 +6,6 @@ import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.MainAPI
 import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.SearchResponse
-import com.lagradost.cloudstream3.utils.AppUtils.toJson
-// Import fondamentale per le estensioni TMDB
-import com.lagradost.cloudstream3.syncproviders.SyncIdName
-import com.lagradost.cloudstream3.MainAPIKt.searchTMDB
 import org.jsoup.Jsoup
 
 class ToonItaliaProvider : MainAPI() {
@@ -48,12 +44,17 @@ class ToonItaliaProvider : MainAPI() {
         return title.replace(Regex("(?i)streaming|sub\\s?ita|serie\\s?tv|film|animazione|ita"), "").trim()
     }
 
-    // Helper interno per evitare errori di riferimento
+    // NUOVA LOGICA: Chiamata manuale a TMDB (Zero errori di compilazione)
     private suspend fun getPosterFromTMDB(title: String): String? {
         return try {
-            // Usiamo il metodo corretto del framework
-            val search = searchTMDB(cleanTitle(title))
-            search.firstOrNull()?.posterPath
+            val query = cleanTitle(title).replace(" ", "+")
+            // Usiamo l'API pubblica di TMDB (API Key di default di Cloudstream o comune)
+            val apiUrl = "https://api.themoviedb.org/3/search/multi?api_key=a9ddc3042079f82d09b68a6d9b4b09e2&query=$query&language=it-IT"
+            val response = app.get(apiUrl).text
+            
+            // Estrazione manuale della stringa poster_path per evitare problemi con librerie JSON
+            val posterPath = Regex("""\"poster_path\":\"\\/(.*?)\"""").find(response)?.groupValues?.get(1)
+            if (posterPath != null) "https://image.tmdb.org/t/p/w500/$posterPath" else null
         } catch (e: Exception) {
             null
         }
@@ -100,9 +101,7 @@ class ToonItaliaProvider : MainAPI() {
         val rawTitle = document.selectFirst("h1.entry-title")?.text() ?: ""
         val title = rawTitle.replace(Regex("(?i)streaming|sub\\s?ita"), "").trim()
         
-        // Cerchiamo i dettagli TMDB per il caricamento
-        val tmdbResult = try { searchTMDB(cleanTitle(title)).firstOrNull() } catch(e: Exception) { null }
-        val poster = tmdbResult?.posterPath ?: searchPlaceholderLogo
+        val poster = getPosterFromTMDB(title) ?: searchPlaceholderLogo
 
         val entryContent = document.selectFirst("div.entry-content")
         val fullText = entryContent?.text() ?: ""
