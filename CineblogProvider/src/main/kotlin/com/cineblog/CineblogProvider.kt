@@ -13,18 +13,20 @@ class CineblogProvider : MainAPI() {
     override val hasMainPage = true
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
+        // La home usa GET
         val doc = app.get(mainUrl).document
-        val items = doc.select(".promo-item, .movie-item, .m-item, article.short").mapNotNull {
+        // Cerchiamo tutti i possibili contenitori di film
+        val items = doc.select("article.short, .promo-item, .movie-item, .m-item").mapNotNull {
             it.toSearchResult()
         }.distinctBy { it.url }
 
-        return newHomePageResponse(listOf(HomePageList("In Evidenza", items)), false)
+        return newHomePageResponse(listOf(HomePageList("Novità", items)), false)
     }
 
-    // Firma corretta e cast esplicito per risolvere il mismatch
     override suspend fun search(query: String, page: Int): SearchResponseList? {
         val resultFrom = ((page - 1) * 10) + 1
         
+        // Ricerca con POST come da file cerca.txt
         val response = app.post(
             "$mainUrl/index.php?do=search",
             data = mapOf(
@@ -38,24 +40,28 @@ class CineblogProvider : MainAPI() {
         )
         
         val doc = response.document
-        // Creiamo la lista e la restituiamo come SearchResponseList
-        val results = doc.select("article.short, .m-item, .movie-item").mapNotNull {
-            it.toSearchResult()
+        val results = doc.select("article.short, .m-item, .movie-item, .story-heading").mapNotNull {
+            // Se il selettore ha preso il titolo direttamente, risaliamo al parent
+            if (it.hasClass("story-heading")) it.parent()?.toSearchResult() 
+            else it.toSearchResult()
         }.distinctBy { it.url }
 
         return results as SearchResponseList?
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        val a = this.selectFirst(".story-heading a, h2 a, h3 a, a") ?: return null
+        // Cerchiamo il link del titolo: proviamo più combinazioni
+        val a = this.selectFirst(".story-heading a, h2 a, h3 a, .m-title a, a") ?: return null
         val href = fixUrl(a.attr("href"))
         
-        if (href.contains("/tags/") || href.contains("/category/")) return null
+        // Filtriamo link inutili
+        if (href.contains("/tags/") || href.contains("/category/") || href == mainUrl) return null
 
-        val title = a.text().trim()
+        val title = a.text().trim().ifEmpty { this.selectFirst("img")?.attr("alt") } ?: return null
         if (title.isBlank()) return null
 
-        val img = this.selectFirst(".story-cover img, img")
+        // Cerchiamo la locandina: proviamo data-src (lazy load) o src standard
+        val img = this.selectFirst("img")
         val posterUrl = fixUrlNull(
             img?.attr("data-src") ?: img?.attr("src")
         )
@@ -75,9 +81,10 @@ class CineblogProvider : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse? {
         val doc = app.get(url).document
-        val title = doc.selectFirst("h1, .story-heading")?.text()?.trim() ?: return null
-        val poster = fixUrlNull(doc.selectFirst(".story-cover img, .film-poster img")?.attr("src"))
-        val plot = doc.selectFirst(".story")?.text() ?: doc.selectFirst("meta[name=description]")?.attr("content")
+        val title = doc.selectFirst("h1, .story-heading, .m-title")?.text()?.trim() ?: return null
+        val poster = fixUrlNull(doc.selectFirst(".story-cover img, .film-poster img, .m-img img")?.attr("src"))
+        val plot = doc.selectFirst(".story, .m-desc, meta[name=description]")?.text() 
+            ?: doc.selectFirst("meta[name=description]")?.attr("content")
         
         val isSerie = url.contains("/serie-tv/") || doc.select("#tv_tabs, .episodes-list").isNotEmpty()
 
@@ -86,9 +93,7 @@ class CineblogProvider : MainAPI() {
                 val link = if (li.tagName() == "a") li else li.selectFirst("a")
                 if (link != null) {
                     val epData = link.attr("href")
-                    newEpisode(epData) { 
-                        this.name = link.text().trim()
-                    }
+                    newEpisode(epData) { this.name = link.text().trim() }
                 } else null
             }
             newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
