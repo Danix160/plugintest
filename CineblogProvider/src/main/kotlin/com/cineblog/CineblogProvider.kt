@@ -21,8 +21,7 @@ class CineblogProvider : MainAPI() {
         return newHomePageResponse(listOf(HomePageList("In Evidenza", items)), false)
     }
 
-    // Firma corretta per evitare l'errore di compilazione
-    // Utilizziamo SearchResponseList? come richiesto dall'errore
+    // Firma corretta e cast esplicito per risolvere il mismatch
     override suspend fun search(query: String, page: Int): SearchResponseList? {
         val resultFrom = ((page - 1) * 10) + 1
         
@@ -39,9 +38,12 @@ class CineblogProvider : MainAPI() {
         )
         
         val doc = response.document
-        return doc.select("article.short, .m-item, .movie-item").mapNotNull {
+        // Creiamo la lista e la restituiamo come SearchResponseList
+        val results = doc.select("article.short, .m-item, .movie-item").mapNotNull {
             it.toSearchResult()
         }.distinctBy { it.url }
+
+        return results as SearchResponseList?
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
