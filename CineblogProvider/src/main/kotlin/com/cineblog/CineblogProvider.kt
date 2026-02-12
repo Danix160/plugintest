@@ -1,8 +1,8 @@
 package com.cineblog
 
 import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.utils.*
-import com.lagradost.cloudstream3.utils.AppUtils.loadExtractor
+import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.utils.loadExtractor
 import org.jsoup.nodes.Element
 
 class CineblogProvider : MainAPI() {
@@ -12,7 +12,6 @@ class CineblogProvider : MainAPI() {
     override var lang = "it"
     override val hasMainPage = true
 
-    // 1. HOME PAGE - Corretto HomePageRequest in MainPageRequest
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
         val document = app.get(mainUrl).document
         val home = mutableListOf<HomePageList>()
@@ -35,7 +34,6 @@ class CineblogProvider : MainAPI() {
         }
     }
 
-    // 2. RICERCA
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/?s=$query"
         val document = app.get(url).document
@@ -45,7 +43,6 @@ class CineblogProvider : MainAPI() {
         }
     }
 
-    // 3. CARICAMENTO DETTAGLI
     override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url).document
         val title = document.selectFirst("h1")?.text()?.trim() ?: return null
@@ -88,7 +85,6 @@ class CineblogProvider : MainAPI() {
         }
     }
 
-    // 4. ESTRAZIONE LINK VIDEO - Usiamo loadExtractor (correzione errore compilazione)
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -112,7 +108,7 @@ class CineblogProvider : MainAPI() {
                 app.get(link).url 
             } else link
 
-            // Carica i link usando la funzione corretta dell'SDK
+            // Usiamo il metodo corretto richiamandolo come funzione di estensione se necessario
             loadExtractor(finalUrl, data, subtitleCallback, callback)
         }
 
