@@ -13,10 +13,9 @@ class CineblogProvider : MainAPI() {
     override val hasMainPage = true
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
-        // La home usa GET
         val doc = app.get(mainUrl).document
-        // Cerchiamo tutti i possibili contenitori di film
-        val items = doc.select("article.short, .promo-item, .movie-item, .m-item").mapNotNull {
+        // Selettori espansi per coprire diverse varianti della home
+        val items = doc.select("article.short, .promo-item, .movie-item, .m-item, .block-list").mapNotNull {
             it.toSearchResult()
         }.distinctBy { it.url }
 
@@ -26,7 +25,7 @@ class CineblogProvider : MainAPI() {
     override suspend fun search(query: String, page: Int): SearchResponseList? {
         val resultFrom = ((page - 1) * 10) + 1
         
-        // Ricerca con POST come da file cerca.txt
+        // Configurazione POST basata sui parametri reali del sito
         val response = app.post(
             "$mainUrl/index.php?do=search",
             data = mapOf(
@@ -36,12 +35,18 @@ class CineblogProvider : MainAPI() {
                 "full_search" to "0",
                 "result_from" to resultFrom.toString(),
                 "story" to query
+            ),
+            headers = mapOf(
+                "Referer" to "$mainUrl/",
+                "X-Requested-With" to "XMLHttpRequest",
+                "Content-Type" to "application/x-www-form-urlencoded"
             )
         )
         
         val doc = response.document
-        val results = doc.select("article.short, .m-item, .movie-item, .story-heading").mapNotNull {
-            // Se il selettore ha preso il titolo direttamente, risaliamo al parent
+        // Cerchiamo i blocchi 'article.short' visti nel tuo file cerca.txt
+        val results = doc.select("article.short, .block-list, .movie-item, .story-heading").mapNotNull {
+            // Se il selettore prende direttamente il titolo, proviamo a usare il parent
             if (it.hasClass("story-heading")) it.parent()?.toSearchResult() 
             else it.toSearchResult()
         }.distinctBy { it.url }
@@ -50,21 +55,20 @@ class CineblogProvider : MainAPI() {
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        // Cerchiamo il link del titolo: proviamo più combinazioni
-        val a = this.selectFirst(".story-heading a, h2 a, h3 a, .m-title a, a") ?: return null
+        // Cerca il link: prova story-heading (ricerca) o h2/h3/a generici (home)
+        val a = this.selectFirst(".story-heading a, h3 a, h2 a, .m-title a, a[href*='/film/'], a[href*='/serie-tv/']") ?: return null
         val href = fixUrl(a.attr("href"))
         
-        // Filtriamo link inutili
-        if (href.contains("/tags/") || href.contains("/category/") || href == mainUrl) return null
+        // Esclude pagine di servizio
+        if (href.contains("/tags/") || href.contains("/category/") || href == "$mainUrl/") return null
 
-        val title = a.text().trim().ifEmpty { this.selectFirst("img")?.attr("alt") } ?: return null
-        if (title.isBlank()) return null
+        val title = a.text().trim().ifEmpty { 
+            this.selectFirst("img")?.attr("alt") 
+        } ?: return null
 
-        // Cerchiamo la locandina: proviamo data-src (lazy load) o src standard
+        // Gestione locandina con Lazy Load (data-src)
         val img = this.selectFirst("img")
-        val posterUrl = fixUrlNull(
-            img?.attr("data-src") ?: img?.attr("src")
-        )
+        val posterUrl = fixUrlNull(img?.attr("data-src") ?: img?.attr("src"))
 
         val isTv = href.contains("/serie-tv/") || title.contains("serie tv", true)
 
@@ -114,15 +118,18 @@ class CineblogProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
+        // Se il dato è già un link esterno
         if (data.startsWith("http") && !data.contains(mainUrl)) {
             loadExtractor(data, data, subtitleCallback, callback)
             return true
         }
 
         val doc = app.get(data).document
-        doc.select("a[href*='mixdrop'], a[href*='supervideo'], a[href*='vidoza'], a[href*='streamtape']")
+        // Estrazione link dai vari host supportati
+        doc.select("a[href*='mixdrop'], a[href*='supervideo'], a[href*='vidoza'], a[href*='streamtape'], a[href*='filemoon']")
             .forEach { 
                 val link = it.attr("href")
+                // Gestione del redirect interno /vai/
                 val finalUrl = if (link.contains("/vai/")) {
                     try { app.get(link).url } catch (e: Exception) { link }
                 } else link
