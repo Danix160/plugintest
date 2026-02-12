@@ -21,19 +21,15 @@ class CineblogProvider : MainAPI() {
         return newHomePageResponse(listOf(HomePageList("In Evidenza", items)), false)
     }
 
-    // Corretto il tipo di ritorno per supportare la paginazione infinita
+    // Usiamo una sola funzione search che sovrascrive quella con la paginazione
+    // Il tipo di ritorno List<SearchResponse> è quello corretto per MainAPI
     override suspend fun search(query: String): List<SearchResponse> {
-        // Questa chiamata serve per la ricerca iniziale
-        val url = "$mainUrl/index.php?do=search&subaction=search&story=$query&search_start=1"
-        val doc = app.get(url).document
-        
-        return doc.select(".m-item, .movie-item, article").mapNotNull {
-            it.toSearchResult()
-        }.distinctBy { it.url }
+        // Richiama la funzione con pagina 1 di default
+        return search(query, 1)
     }
 
-    // Questa è la funzione specifica richiesta per gestire le pagine successive
     override suspend fun search(query: String, page: Int): List<SearchResponse> {
+        // DLE usa search_start per definire da quale pagina iniziare
         val url = "$mainUrl/index.php?do=search&subaction=search&story=$query&search_start=$page"
         val doc = app.get(url).document
         
