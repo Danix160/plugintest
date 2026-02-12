@@ -4,6 +4,9 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
 import org.jsoup.nodes.Element
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 
 class CineblogProvider : MainAPI() {
     override var mainUrl = "https://cineblog001.club"
@@ -12,35 +15,31 @@ class CineblogProvider : MainAPI() {
     override var lang = "it"
     override val hasMainPage = true
 
-    // Funzione aggiornata per includere le sezioni Film e Serie TV
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
-        val home = mutableListOf<HomePageList>()
-        
-        // Definiamo le sezioni che vogliamo caricare
         val pages = listOf(
             Pair("$mainUrl/film/", "Ultimi Film"),
             Pair("$mainUrl/serie-tv/", "Ultime Serie TV"),
             Pair(mainUrl, "In Evidenza")
         )
 
-        // Carichiamo le pagine in parallelo per velocità
-        pages.apmap { (url, title) ->
-            try {
-                val doc = app.get(url).document
-                val items = doc.select("div.promo-item, div.movie-item").mapNotNull {
-                    it.toSearchResult()
-                }
-                if (items.isNotEmpty()) {
-                    synchronized(home) {
-                        home.add(HomePageList(title, items))
+        // Usiamo coroutineScope per gestire il caricamento parallelo senza bloccare i thread
+        val homeItems = coroutineScope {
+            pages.map { (url, title) ->
+                async {
+                    try {
+                        val doc = app.get(url).document
+                        val items = doc.select("div.promo-item, div.movie-item").mapNotNull {
+                            it.toSearchResult()
+                        }
+                        if (items.isNotEmpty()) HomePageList(title, items) else null
+                    } catch (e: Exception) {
+                        null
                     }
                 }
-            } catch (e: Exception) {
-                // Se una pagina fallisce, continuiamo con le altre
-            }
+            }.awaitAll().filterNotNull()
         }
 
-        return newHomePageResponse(home, false)
+        return newHomePageResponse(homeItems, false)
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
@@ -49,11 +48,11 @@ class CineblogProvider : MainAPI() {
         val href = fixUrl(a.attr("href"))
         val posterUrl = fixUrlNull(this.selectFirst("img")?.attr("data-src") ?: this.selectFirst("img")?.attr("src"))
 
-        // Cerchiamo di capire se è una serie dal link o dal testo
-        val type = if (href.contains("/serie-tv/") || title.contains("serie tv", true)) 
-            TvType.TvSeries else TvType.Movie
+        val isTvSerie = href.contains("/serie-tv/") || 
+                        title.contains("serie tv", true) || 
+                        title.contains("stagion", true)
 
-        return if (type == TvType.TvSeries) {
+        return if (isTvSerie) {
             newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
                 this.posterUrl = posterUrl
             }
@@ -138,10 +137,9 @@ class CineblogProvider : MainAPI() {
                 try { app.get(link).url } catch (e: Exception) { link }
             } else link
 
-            // Chiamata standard dell'SDK
             loadExtractor(finalUrl, data, subtitleCallback, callback)
         }
 
-        return true
+            return true
     }
 }
