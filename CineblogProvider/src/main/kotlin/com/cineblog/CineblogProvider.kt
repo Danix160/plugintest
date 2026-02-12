@@ -21,16 +21,11 @@ class CineblogProvider : MainAPI() {
         return newHomePageResponse(listOf(HomePageList("In Evidenza", items)), false)
     }
 
-    override suspend fun search(query: String): List<SearchResponse> {
-        return search(query, 1)
-    }
-
-    override suspend fun search(query: String, page: Int): List<SearchResponse> {
-        // Calcolo dei parametri basato sul file cerca.txt fornito
-        // Pagina 1 -> result_from = 1, Pagina 2 -> result_from = 11, ecc.
+    // Firma corretta per evitare l'errore di compilazione
+    // Utilizziamo SearchResponseList? come richiesto dall'errore
+    override suspend fun search(query: String, page: Int): SearchResponseList? {
         val resultFrom = ((page - 1) * 10) + 1
         
-        // Il sito usa una richiesta POST per la ricerca
         val response = app.post(
             "$mainUrl/index.php?do=search",
             data = mapOf(
@@ -44,14 +39,12 @@ class CineblogProvider : MainAPI() {
         )
         
         val doc = response.document
-        // Selettore aggiornato basato sulla struttura <article class="short block-list">
         return doc.select("article.short, .m-item, .movie-item").mapNotNull {
             it.toSearchResult()
         }.distinctBy { it.url }
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        // Selettore basato su story-heading trovato nel tuo file
         val a = this.selectFirst(".story-heading a, h2 a, h3 a, a") ?: return null
         val href = fixUrl(a.attr("href"))
         
@@ -60,7 +53,6 @@ class CineblogProvider : MainAPI() {
         val title = a.text().trim()
         if (title.isBlank()) return null
 
-        // Selettore poster aggiornato per story-cover
         val img = this.selectFirst(".story-cover img, img")
         val posterUrl = fixUrlNull(
             img?.attr("data-src") ?: img?.attr("src")
@@ -83,8 +75,7 @@ class CineblogProvider : MainAPI() {
         val doc = app.get(url).document
         val title = doc.selectFirst("h1, .story-heading")?.text()?.trim() ?: return null
         val poster = fixUrlNull(doc.selectFirst(".story-cover img, .film-poster img")?.attr("src"))
-        val plot = doc.selectFirst(".story, meta[name=description]")?.text() ?: 
-                   doc.selectFirst("meta[name=description]")?.attr("content")
+        val plot = doc.selectFirst(".story")?.text() ?: doc.selectFirst("meta[name=description]")?.attr("content")
         
         val isSerie = url.contains("/serie-tv/") || doc.select("#tv_tabs, .episodes-list").isNotEmpty()
 
@@ -116,18 +107,15 @@ class CineblogProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // Se i dati sono già un link diretto a un estrattore
         if (data.startsWith("http") && !data.contains(mainUrl)) {
             loadExtractor(data, data, subtitleCallback, callback)
             return true
         }
 
         val doc = app.get(data).document
-        // Cerca i link ai video host comuni nel testo della pagina
         doc.select("a[href*='mixdrop'], a[href*='supervideo'], a[href*='vidoza'], a[href*='streamtape']")
             .forEach { 
                 val link = it.attr("href")
-                // Gestione del redirect "/vai/" tipico di Cineblog
                 val finalUrl = if (link.contains("/vai/")) {
                     try { app.get(link).url } catch (e: Exception) { link }
                 } else link
