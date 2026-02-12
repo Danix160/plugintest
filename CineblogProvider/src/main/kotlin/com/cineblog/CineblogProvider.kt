@@ -39,7 +39,7 @@ class CineblogProvider : MainAPI() {
         val title = this.selectFirst("h2, h3, .m-title")?.text() 
             ?: a.attr("title").ifEmpty { a.text() }
         
-        if (title.isNullOrBlank()) return null
+        if (title.isBlank()) return null
 
         val img = this.selectFirst("img")
         val posterUrl = fixUrlNull(
@@ -63,14 +63,13 @@ class CineblogProvider : MainAPI() {
         val doc = app.get(url).document
         val title = doc.selectFirst("h1")?.text()?.trim() ?: return null
         
-        // MIGLIORATO: Selettore poster più robusto per l'interno della scheda
+        // RECUPERO POSTER: Cerchiamo prima quello del player, poi quelli standard
         val poster = fixUrlNull(
-            doc.selectFirst(".story-poster img, .m-img img, .film-poster img, img[itemprop=image]")?.attr("src") 
-            ?: doc.selectFirst("article img")?.attr("src")
+            doc.selectFirst("img._player-cover")?.attr("src") 
+            ?: doc.selectFirst(".story-poster img, .m-img img, img[itemprop=image]")?.attr("src")
         )
         
         val plot = doc.selectFirst("meta[name=description]")?.attr("content")
-        
         val isSerie = url.contains("/serie-tv/") || doc.select("#tv_tabs").isNotEmpty()
 
         return if (isSerie) {
@@ -78,16 +77,17 @@ class CineblogProvider : MainAPI() {
                 val link = li.selectFirst("a")
                 if (link != null) {
                     val epData = link.attr("data-link").ifEmpty { link.attr("href") }
-                    newEpisode(epData) { this.name = link.text() }
+                    newEpisode(epData) { this.name = link.text().trim() }
                 } else null
             }
             newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
-                this.posterUrl = poster // Ora spunterà all'interno
+                this.posterUrl = poster
                 this.plot = plot
             }
         } else {
+            // Per i film, passiamo l'URL della pagina a loadLinks
             newMovieLoadResponse(title, url, TvType.Movie, url) {
-                this.posterUrl = poster // Ora spunterà all'interno
+                this.posterUrl = poster
                 this.plot = plot
             }
         }
@@ -105,14 +105,23 @@ class CineblogProvider : MainAPI() {
         }
 
         val doc = app.get(data).document
+        
+        // NUOVO SISTEMA: Estrae i link dai tag <li> del player (Film)
+        doc.select("ul._player-mirrors li, ._hidden-mirrors li").forEach { li ->
+            val link = li.attr("data-link")
+            if (link.isNotEmpty()) {
+                val finalUrl = fixUrl(link)
+                loadExtractor(finalUrl, data, subtitleCallback, callback)
+            }
+        }
+
+        // Manteniamo anche il vecchio sistema per sicurezza (Serie TV)
         doc.select("a[href*='mixdrop'], a[href*='supervideo'], a[href*='vidoza']")
             .forEach { 
                 val link = it.attr("href")
-                val finalUrl = if (link.contains("/vai/")) {
-                    try { app.get(link).url } catch (e: Exception) { link }
-                } else link
-                loadExtractor(finalUrl, data, subtitleCallback, callback)
+                loadExtractor(link, data, subtitleCallback, callback)
             }
+            
         return true
     }
 }
