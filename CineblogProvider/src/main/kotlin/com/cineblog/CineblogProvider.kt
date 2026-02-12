@@ -21,18 +21,13 @@ class CineblogProvider : MainAPI() {
         return newHomePageResponse(listOf(HomePageList("In Evidenza", items)), false)
     }
 
-    // Usiamo una sola funzione search che sovrascrive quella con la paginazione
-    // Il tipo di ritorno List<SearchResponse> è quello corretto per MainAPI
-    override suspend fun search(query: String): List<SearchResponse> {
-        // Richiama la funzione con pagina 1 di default
-        return search(query, 1)
-    }
-
+    // Questa funzione ora segue esattamente la firma richiesta da MainAPI
     override suspend fun search(query: String, page: Int): List<SearchResponse> {
-        // DLE usa search_start per definire da quale pagina iniziare
+        // Calcoliamo lo start per il motore DLE (solitamente page 1 = 1, page 2 = 2...)
         val url = "$mainUrl/index.php?do=search&subaction=search&story=$query&search_start=$page"
         val doc = app.get(url).document
         
+        // Estraiamo i risultati
         return doc.select(".m-item, .movie-item, article").mapNotNull {
             it.toSearchResult()
         }.distinctBy { it.url }
