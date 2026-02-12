@@ -2,7 +2,7 @@ package com.cineblog
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.utils.AppUtils.loadExtractor
 import org.jsoup.nodes.Element
 
 class CineblogProvider : MainAPI() {
@@ -12,12 +12,11 @@ class CineblogProvider : MainAPI() {
     override var lang = "it"
     override val hasMainPage = true
 
-    // 1. HOME PAGE
-    override suspend fun getMainPage(page: Int, request: HomePageRequest): HomePageResponse? {
+    // 1. HOME PAGE - Corretto HomePageRequest in MainPageRequest
+    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
         val document = app.get(mainUrl).document
         val home = mutableListOf<HomePageList>()
 
-        // Sezioni principali (Ultimi film, In evidenza)
         val items = document.select("div.promo-item").mapNotNull {
             it.toSearchResult()
         }
@@ -46,7 +45,7 @@ class CineblogProvider : MainAPI() {
         }
     }
 
-    // 3. CARICAMENTO DETTAGLI (FILM E SERIE TV)
+    // 3. CARICAMENTO DETTAGLI
     override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url).document
         val title = document.selectFirst("h1")?.text()?.trim() ?: return null
@@ -58,16 +57,14 @@ class CineblogProvider : MainAPI() {
         return if (isSerie) {
             val episodesList = mutableListOf<Episode>()
             
-            // Parsing stagioni ed episodi (basato su serie.txt)
             document.select("div.tt_series div.tab-pane ul li").forEach { li ->
                 val a = li.selectFirst("a[id^=serie-]")
                 if (a != null) {
-                    val epData = a.attr("data-num") // Formato "1x1"
+                    val epData = a.attr("data-num")
                     val season = epData.split("x").firstOrNull()?.toIntOrNull()
                     val episode = epData.split("x").lastOrNull()?.toIntOrNull()
                     val epTitle = a.attr("data-title").substringBefore(":")
                     
-                    // Raccogliamo i mirror come dati dell'episodio
                     val mainLink = a.attr("data-link")
                     val mirrors = li.select(".mirrors a.mr").map { it.attr("data-link") }.toMutableList()
                     mirrors.add(0, mainLink)
@@ -91,32 +88,32 @@ class CineblogProvider : MainAPI() {
         }
     }
 
-    // 4. ESTRAZIONE LINK VIDEO
+    // 4. ESTRAZIONE LINK VIDEO - Usiamo loadExtractor (correzione errore compilazione)
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // 'data' contiene o l'URL del film o la lista di mirror dell'episodio separati da virgola
-        val urls = if (data.contains(mainUrl)) {
-            // È un film, cerchiamo i link nella pagina
-            val doc = app.get(data).document
-            doc.select("a[href*='mixdrop'], a[href*='supervideo'], a[href*='vidoza'], a[href*='streamtape']")
-                .map { it.attr("href") }
+        val urls = if (data.startsWith("http")) {
+            if (data.contains(mainUrl)) {
+                val doc = app.get(data).document
+                doc.select("a[href*='mixdrop'], a[href*='supervideo'], a[href*='vidoza'], a[href*='streamtape']")
+                    .map { it.attr("href") }
+            } else {
+                listOf(data)
+            }
         } else {
-            // Sono i link dell'episodio salvati precedentemente
             data.split(",")
         }
 
         urls.forEach { link ->
-            // Se il link è un redirect interno del sito (es. /vai/), dobbiamo risolverlo
             val finalUrl = if (link.contains("/vai/")) {
                 app.get(link).url 
             } else link
 
-            // Carica i link usando gli estrattori integrati di CloudStream
-            loadFixedExtractor(finalUrl, data, subtitleCallback, callback)
+            // Carica i link usando la funzione corretta dell'SDK
+            loadExtractor(finalUrl, data, subtitleCallback, callback)
         }
 
         return true
