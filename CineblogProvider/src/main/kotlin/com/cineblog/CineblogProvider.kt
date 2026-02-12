@@ -12,25 +12,55 @@ class CineblogProvider : MainAPI() {
     override var lang = "it"
     override val hasMainPage = true
 
+    // Funzione aggiornata per includere le sezioni Film e Serie TV
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
-        val document = app.get(mainUrl).document
         val home = mutableListOf<HomePageList>()
+        
+        // Definiamo le sezioni che vogliamo caricare
+        val pages = listOf(
+            Pair("$mainUrl/film/", "Ultimi Film"),
+            Pair("$mainUrl/serie-tv/", "Ultime Serie TV"),
+            Pair(mainUrl, "In Evidenza")
+        )
 
-        val items = document.select("div.promo-item").mapNotNull {
-            it.toSearchResult()
+        // Carichiamo le pagine in parallelo per velocità
+        pages.apmap { (url, title) ->
+            try {
+                val doc = app.get(url).document
+                val items = doc.select("div.promo-item, div.movie-item").mapNotNull {
+                    it.toSearchResult()
+                }
+                if (items.isNotEmpty()) {
+                    synchronized(home) {
+                        home.add(HomePageList(title, items))
+                    }
+                }
+            } catch (e: Exception) {
+                // Se una pagina fallisce, continuiamo con le altre
+            }
         }
-        if (items.isNotEmpty()) home.add(HomePageList("Ultimi Inserimenti", items))
 
-        return newHomePageResponse(home)
+        return newHomePageResponse(home, false)
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        val title = this.selectFirst("a")?.attr("title") ?: return null
-        val href = fixUrl(this.selectFirst("a")?.attr("href") ?: return null)
+        val a = this.selectFirst("a") ?: return null
+        val title = a.attr("title").ifEmpty { a.text() } ?: return null
+        val href = fixUrl(a.attr("href"))
         val posterUrl = fixUrlNull(this.selectFirst("img")?.attr("data-src") ?: this.selectFirst("img")?.attr("src"))
 
-        return newMovieSearchResponse(title, href, TvType.Movie) {
-            this.posterUrl = posterUrl
+        // Cerchiamo di capire se è una serie dal link o dal testo
+        val type = if (href.contains("/serie-tv/") || title.contains("serie tv", true)) 
+            TvType.TvSeries else TvType.Movie
+
+        return if (type == TvType.TvSeries) {
+            newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
+                this.posterUrl = posterUrl
+            }
+        } else {
+            newMovieSearchResponse(title, href, TvType.Movie) {
+                this.posterUrl = posterUrl
+            }
         }
     }
 
@@ -38,7 +68,7 @@ class CineblogProvider : MainAPI() {
         val url = "$mainUrl/?s=$query"
         val document = app.get(url).document
         
-        return document.select("div.promo-item, div.movie-item").mapNotNull {
+        return document.select("div.promo-item, div.movie-item, div.result-item").mapNotNull {
             it.toSearchResult()
         }
     }
@@ -49,7 +79,7 @@ class CineblogProvider : MainAPI() {
         val poster = fixUrlNull(document.selectFirst("div.film-poster img")?.attr("src"))
         val plot = document.selectFirst("meta[name=description]")?.attr("content")
         
-        val isSerie = document.select("#tv_tabs").isNotEmpty()
+        val isSerie = url.contains("/serie-tv/") || document.select("#tv_tabs").isNotEmpty()
 
         return if (isSerie) {
             val episodesList = mutableListOf<Episode>()
@@ -105,10 +135,10 @@ class CineblogProvider : MainAPI() {
 
         urls.forEach { link ->
             val finalUrl = if (link.contains("/vai/")) {
-                app.get(link).url 
+                try { app.get(link).url } catch (e: Exception) { link }
             } else link
 
-            // Usiamo il metodo corretto richiamandolo come funzione di estensione se necessario
+            // Chiamata standard dell'SDK
             loadExtractor(finalUrl, data, subtitleCallback, callback)
         }
 
