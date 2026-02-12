@@ -14,43 +14,58 @@ class CineblogProvider : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
         val doc = app.get(mainUrl).document
-        val items = doc.select("article, .m-item, .movie-item, .promo-item").mapNotNull {
+        // Selettore home basato sulla struttura standard
+        val items = doc.select("article.short, .movie-item, .m-item").mapNotNull {
             it.toSearchResult()
         }.distinctBy { it.url }
 
         return newHomePageResponse(listOf(HomePageList("Novità", items)), false)
     }
 
-    // Usiamo la logica GET che hai confermato funzionare, aggiungendo il supporto alle pagine
     override suspend fun search(query: String, page: Int): SearchResponseList? {
-        // Costruiamo l'URL includendo il parametro per la pagina (search_start)
-        // Pagina 1 -> search_start=1, Pagina 2 -> search_start=2, ecc.
-        val url = "$mainUrl/index.php?do=search&subaction=search&story=$query&search_start=$page"
+        // Calcolo dell'inizio risultati come visto nel tuo file cerca.txt
+        val resultFrom = ((page - 1) * 10) + 1
         
-        val doc = app.get(url).document
+        // Il sito richiede POST per mostrare i risultati. Senza POST, restituisce 0 risultati.
+        val response = app.post(
+            "$mainUrl/index.php?do=search",
+            data = mapOf(
+                "do" to "search",
+                "subaction" to "search",
+                "search_start" to page.toString(),
+                "full_search" to "0",
+                "result_from" to resultFrom.toString(),
+                "story" to query // La parola chiave deve stare qui
+            ),
+            headers = mapOf(
+                "Content-Type" to "application/x-www-form-urlencoded",
+                "Referer" to "$mainUrl/index.php?do=search"
+            )
+        )
         
-        // Usiamo i selettori che hai indicato come funzionanti
-        val results = doc.select(".m-item, .movie-item, article").mapNotNull {
+        val doc = response.document
+        
+        // Selettore specifico per i risultati della ricerca nel file cerca.txt
+        // Cerchiamo 'article.short' o i titoli 'story-heading'
+        val results = doc.select("article.short, .block-list, .movie-item").mapNotNull {
             it.toSearchResult()
         }.distinctBy { it.url }
 
-        // Il cast 'as SearchResponseList?' serve a evitare l'errore di compilazione Gradle
         return results as SearchResponseList?
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        // Cerchiamo il link (a) e il titolo
-        val a = this.selectFirst("h2 a, h3 a, .m-title a, a") ?: return null
+        // Cerchiamo il link del titolo (h3 o h2 con classe story-heading)
+        val a = this.selectFirst(".story-heading a, h3 a, h2 a, a") ?: return null
         val href = fixUrl(a.attr("href"))
         
-        // Escludiamo link non pertinenti
         if (href.contains("/tags/") || href.contains("/category/") || href == "$mainUrl/") return null
 
         val title = a.text().trim().ifEmpty { 
             this.selectFirst("img")?.attr("alt") 
         } ?: return null
 
-        // Gestione locandina
+        // Gestione immagine (proviamo data-src per il lazy load visto nel file)
         val img = this.selectFirst("img")
         val posterUrl = fixUrlNull(img?.attr("data-src") ?: img?.attr("src"))
 
@@ -69,9 +84,9 @@ class CineblogProvider : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse? {
         val doc = app.get(url).document
-        val title = doc.selectFirst("h1, .story-heading, .m-title")?.text()?.trim() ?: return null
-        val poster = fixUrlNull(doc.selectFirst(".story-cover img, .film-poster img, .m-img img")?.attr("src"))
-        val plot = doc.selectFirst(".story, .m-desc, #news-id")?.text() ?: doc.selectFirst("meta[name=description]")?.attr("content")
+        val title = doc.selectFirst("h1, .story-heading")?.text()?.trim() ?: return null
+        val poster = fixUrlNull(doc.selectFirst(".story-cover img, .film-poster img")?.attr("src"))
+        val plot = doc.selectFirst(".story, #news-id")?.text() ?: doc.selectFirst("meta[name=description]")?.attr("content")
         
         val isSerie = url.contains("/serie-tv/") || doc.select("#tv_tabs, .episodes-list").isNotEmpty()
 
