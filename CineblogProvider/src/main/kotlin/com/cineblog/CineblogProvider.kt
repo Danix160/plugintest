@@ -14,7 +14,6 @@ class CineblogProvider : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
         val doc = app.get(mainUrl).document
-        // Selettori per gli elementi della home
         val items = doc.select(".promo-item, .movie-item, .m-item").mapNotNull {
             it.toSearchResult()
         }.distinctBy { it.url }
@@ -22,18 +21,22 @@ class CineblogProvider : MainAPI() {
         return newHomePageResponse(listOf(HomePageList("In Evidenza", items)), false)
     }
 
+    // Corretto il tipo di ritorno per supportare la paginazione infinita
     override suspend fun search(query: String): List<SearchResponse> {
-        // Questa funzione viene chiamata per la prima pagina (page 1)
-        return search(query, 1)
+        // Questa chiamata serve per la ricerca iniziale
+        val url = "$mainUrl/index.php?do=search&subaction=search&story=$query&search_start=1"
+        val doc = app.get(url).document
+        
+        return doc.select(".m-item, .movie-item, article").mapNotNull {
+            it.toSearchResult()
+        }.distinctBy { it.url }
     }
 
-    // Funzione di ricerca con supporto alla paginazione per risultati infiniti
+    // Questa è la funzione specifica richiesta per gestire le pagine successive
     override suspend fun search(query: String, page: Int): List<SearchResponse> {
-        // DLE (il motore di Cineblog) usa search_start per la paginazione
         val url = "$mainUrl/index.php?do=search&subaction=search&story=$query&search_start=$page"
         val doc = app.get(url).document
         
-        // Estraiamo i risultati dalla pagina corrente
         return doc.select(".m-item, .movie-item, article").mapNotNull {
             it.toSearchResult()
         }.distinctBy { it.url }
@@ -43,16 +46,13 @@ class CineblogProvider : MainAPI() {
         val a = this.selectFirst("a") ?: return null
         val href = fixUrl(a.attr("href"))
         
-        // Filtriamo i link che non sono contenuti (tag, categorie, ecc.)
         if (href.contains("/tags/") || href.contains("/category/")) return null
 
-        // Titolo: cerchiamo in h2, h3 o attributo title
         val title = this.selectFirst("h2, h3, .m-title")?.text() 
             ?: a.attr("title").ifEmpty { a.text() }
         
         if (title.isNullOrBlank()) return null
 
-        // Poster: gestiamo caricamento normale e lazy-loading (data-src)
         val img = this.selectFirst("img")
         val posterUrl = fixUrlNull(
             img?.attr("data-src") ?: img?.attr("src")
@@ -77,7 +77,6 @@ class CineblogProvider : MainAPI() {
         val poster = fixUrlNull(doc.selectFirst(".film-poster img, .m-img img")?.attr("src"))
         val plot = doc.selectFirst("meta[name=description]")?.attr("content")
         
-        // Verifica se è una serie TV tramite URL o presenza di tab episodi
         val isSerie = url.contains("/serie-tv/") || doc.select("#tv_tabs").isNotEmpty()
 
         return if (isSerie) {
@@ -106,18 +105,15 @@ class CineblogProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // Se i dati sono già un link esterno (comune nelle serie)
         if (data.startsWith("http") && !data.contains(mainUrl)) {
             loadExtractor(data, data, subtitleCallback, callback)
             return true
         }
 
-        // Se è la pagina del film, cerchiamo i link ai vari hoster
         val doc = app.get(data).document
         doc.select("a[href*='mixdrop'], a[href*='supervideo'], a[href*='vidoza']")
             .forEach { 
                 val link = it.attr("href")
-                // Gestione del redirect intermedio /vai/
                 val finalUrl = if (link.contains("/vai/")) {
                     try { app.get(link).url } catch (e: Exception) { link }
                 } else link
