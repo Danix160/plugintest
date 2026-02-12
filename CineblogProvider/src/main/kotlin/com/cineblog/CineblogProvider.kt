@@ -21,8 +21,8 @@ class CineblogProvider : MainAPI() {
         return newHomePageResponse(listOf(HomePageList("In Evidenza", items)), false)
     }
 
-    // Aggiunto il parametro 'page' per evitare errori di override su GitHub
-    override suspend fun search(query: String, page: Int): List<SearchResponse> {
+    // CORRETTO: Adesso la firma corrisponde esattamente a quella richiesta dall'SDK
+    override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/index.php?do=search&subaction=search&story=$query"
         val doc = app.get(url).document
         
@@ -64,7 +64,7 @@ class CineblogProvider : MainAPI() {
         val doc = app.get(url).document
         val title = doc.selectFirst("h1")?.text()?.trim() ?: return null
         
-        // Risolto errore 'cite': i selettori CSS sono stati ripuliti
+        // POSTER: Recupero dalla classe _player-cover come visto nel tuo HTML
         val poster = fixUrlNull(
             doc.selectFirst("img._player-cover")?.attr("src") 
             ?: doc.selectFirst(".story-poster img, .m-img img, img[itemprop='image']")?.attr("src")
@@ -106,18 +106,10 @@ class CineblogProvider : MainAPI() {
 
         val doc = app.get(data).document
         
-        // Estrazione dai mirror del player (supervideo, dropload, etc.)
-        doc.select("ul._player-mirrors li").forEach { li ->
+        // Estrazione dai mirror data-link (Film)
+        doc.select("ul._player-mirrors li, div._hidden-mirrors li").forEach { li ->
             val link = li.attr("data-link")
             if (link.isNotBlank() && !link.contains("mostraguarda.stream")) {
-                loadExtractor(fixUrl(link), data, subtitleCallback, callback)
-            }
-        }
-        
-        // Estrazione dai mirror nascosti (mixdrop, streamhg)
-        doc.select("div._hidden-mirrors li").forEach { li ->
-            val link = li.attr("data-link")
-            if (link.isNotBlank()) {
                 loadExtractor(fixUrl(link), data, subtitleCallback, callback)
             }
         }
