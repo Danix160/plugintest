@@ -63,13 +63,13 @@ class CineblogProvider : MainAPI() {
         val doc = app.get(url).document
         val title = doc.selectFirst("h1")?.text()?.trim() ?: return null
         
-        // RECUPERO POSTER: Cerchiamo prima quello del player, poi quelli standard
+        // POSTER: Estrae l'immagine dalla classe ._player-cover fornita nell'HTML 
         val poster = fixUrlNull(
             doc.selectFirst("img._player-cover")?.attr("src") 
             ?: doc.selectFirst(".story-poster img, .m-img img, img[itemprop=image]")?.attr("src")
         )
         
-        val plot = doc.selectFirst("meta[name=description]")?.attr("content")
+        val plot = doc.selectFirst("meta[name=description]")?.attr("content") [cite: 1]
         val isSerie = url.contains("/serie-tv/") || doc.select("#tv_tabs").isNotEmpty()
 
         return if (isSerie) {
@@ -85,7 +85,6 @@ class CineblogProvider : MainAPI() {
                 this.plot = plot
             }
         } else {
-            // Per i film, passiamo l'URL della pagina a loadLinks
             newMovieLoadResponse(title, url, TvType.Movie, url) {
                 this.posterUrl = poster
                 this.plot = plot
@@ -99,6 +98,7 @@ class CineblogProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
+        // Se il link è già esterno, caricalo direttamente
         if (data.startsWith("http") && !data.contains(mainUrl)) {
             loadExtractor(data, data, subtitleCallback, callback)
             return true
@@ -106,22 +106,22 @@ class CineblogProvider : MainAPI() {
 
         val doc = app.get(data).document
         
-        // NUOVO SISTEMA: Estrae i link dai tag <li> del player (Film)
-        doc.select("ul._player-mirrors li, ._hidden-mirrors li").forEach { li ->
-            val link = li.attr("data-link")
+        // Estrazione dai mirror del player (supervideo, dropload, etc.) 
+        doc.select("ul._player-mirrors li").forEach { li ->
+            val link = li.attr("data-link") [cite: 3, 4, 5]
+            if (link.isNotEmpty() && !link.contains("mostraguarda.stream")) { // Escludiamo il Server 4K che spesso è protetto
+                loadExtractor(fixUrl(link), data, subtitleCallback, callback)
+            }
+        }
+        
+        // Estrazione dai mirror nascosti (mixdrop, streamhg) 
+        doc.select("div._hidden-mirrors li").forEach { li ->
+            val link = li.attr("data-link") [cite: 8, 9]
             if (link.isNotEmpty()) {
-                val finalUrl = fixUrl(link)
-                loadExtractor(finalUrl, data, subtitleCallback, callback)
+                loadExtractor(fixUrl(link), data, subtitleCallback, callback)
             }
         }
 
-        // Manteniamo anche il vecchio sistema per sicurezza (Serie TV)
-        doc.select("a[href*='mixdrop'], a[href*='supervideo'], a[href*='vidoza']")
-            .forEach { 
-                val link = it.attr("href")
-                loadExtractor(link, data, subtitleCallback, callback)
-            }
-            
         return true
     }
 }
