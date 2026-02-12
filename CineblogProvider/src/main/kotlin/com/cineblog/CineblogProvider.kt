@@ -14,8 +14,8 @@ class CineblogProvider : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
         val doc = app.get(mainUrl).document
-        // Selettore specifico per gli elementi della home
-        val items = doc.select(".promo-item, .movie-item, .m-item").mapNotNull {
+        // Selettore espanso per coprire sia promo che liste standard
+        val items = doc.select(".promo-item, .movie-item, .m-item, article").mapNotNull {
             it.toSearchResult()
         }.distinctBy { it.url }
 
@@ -23,36 +23,37 @@ class CineblogProvider : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        // Usiamo il formato URL che mi hai indicato
+        // Questa è la stringa esatta per i siti DLE come questo
         val url = "$mainUrl/index.php?do=search&subaction=search&story=$query"
         val doc = app.get(url).document
         
-        // Nella pagina di ricerca i risultati sono dentro .m-item o .movie-item
-        return doc.select(".m-item, .movie-item, article").mapNotNull {
+        // La ricerca usa quasi sempre .m-item o .m-title
+        return doc.select(".m-item, .movie-item, article, .m-img").mapNotNull {
             it.toSearchResult()
         }.distinctBy { it.url }
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        // Cerchiamo il link (<a>) che contiene l'URL e spesso l'immagine
+        // Cerchiamo il link principale. Nella ricerca spesso è dentro .m-title o sopra l'immagine
         val a = this.selectFirst("a") ?: return null
         val href = fixUrl(a.attr("href"))
         
-        // Scartiamo link che non sono film (es. categorie)
-        if (href.contains("/tags/") || href.contains("/category/")) return null
+        // Filtriamo link inutili
+        if (href.contains("/tags/") || href.contains("/category/") || href == mainUrl) return null
 
-        // Il titolo si trova spesso nell'attributo title di <a> o in un <h3>
-        val title = this.selectFirst("h2, h3, .m-title")?.text() 
+        // Titolo: lo cerchiamo in vari posti (h3, h2, o attributo title)
+        val title = this.selectFirst("h2, h3, .m-title, .promo-title")?.text() 
             ?: a.attr("title").ifEmpty { a.text() }
         
-        if (title.isNullOrBlank()) return null
+        if (title.isNullOrBlank() || title.length < 2) return null
 
-        // Il poster è solitamente dentro l'immagine
+        // Immagine: cerchiamo sia src che data-src
         val img = this.selectFirst("img")
         val posterUrl = fixUrlNull(
-            img?.attr("data-src") ?: img?.attr("src")
+            img?.attr("data-src") ?: img?.attr("src") ?: img?.attr("data-original")
         )
 
+        // Capisce se è una serie TV dal link o dal titolo
         val isTv = href.contains("/serie-tv/") || title.contains("serie tv", true)
 
         return if (isTv) {
@@ -68,18 +69,22 @@ class CineblogProvider : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse? {
         val doc = app.get(url).document
-        val title = doc.selectFirst("h1")?.text()?.trim() ?: return null
-        val poster = fixUrlNull(doc.selectFirst(".film-poster img, .m-img img")?.attr("src"))
+        val title = doc.selectFirst("h1, .m-title")?.text()?.trim() ?: return null
+        val poster = fixUrlNull(doc.selectFirst(".film-poster img, .m-img img, .poster img")?.attr("src"))
         val plot = doc.selectFirst("meta[name=description]")?.attr("content")
         
-        val isSerie = url.contains("/serie-tv/") || doc.select("#tv_tabs").isNotEmpty()
+        // Controllo se ci sono tab o liste di episodi
+        val isSerie = url.contains("/serie-tv/") || doc.select("#tv_tabs, .tt_series, .episodes-list").isNotEmpty()
 
         return if (isSerie) {
-            val episodes = doc.select(".tt_series li, .episodes-list li").mapNotNull { li ->
+            val episodes = doc.select(".tt_series li, .episodes-list li, #tv_tabs li").mapNotNull { li ->
                 val link = li.selectFirst("a")
                 if (link != null) {
-                    val epData = link.attr("data-link").ifEmpty { link.attr("href") }
-                    newEpisode(epData) { this.name = link.text() }
+                    val data = link.attr("data-link").ifEmpty { link.attr("href") }
+                    if (data.isBlank()) return@mapNotNull null
+                    newEpisode(data) { 
+                        this.name = link.text().trim() 
+                    }
                 } else null
             }
             newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
@@ -100,15 +105,16 @@ class CineblogProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // Se il "data" è già un link diretto (comune nelle serie tv)
+        // Se il dato è già un link a un hoster (comune per gli episodi serie TV)
         if (data.startsWith("http") && !data.contains(mainUrl)) {
             loadExtractor(data, data, subtitleCallback, callback)
             return true
         }
 
-        // Se è l'URL della pagina del film, cerchiamo i player
+        // Per i film, carichiamo la pagina e cerchiamo i link
         val doc = app.get(data).document
-        doc.select("a[href*='mixdrop'], a[href*='supervideo'], a[href*='vidoza']")
+        // Selettore per i vari hoster supportati dagli extractor di CloudStream
+        doc.select("a[href*='mixdrop'], a[href*='supervideo'], a[href*='vidoza'], a[href*='streamtape']")
             .forEach { 
                 val link = it.attr("href")
                 val finalUrl = if (link.contains("/vai/")) {
