@@ -21,7 +21,8 @@ class CineblogProvider : MainAPI() {
         return newHomePageResponse(listOf(HomePageList("In Evidenza", items)), false)
     }
 
-    override suspend fun search(query: String): List<SearchResponse> {
+    // Aggiunto il parametro 'page' per evitare errori di override su GitHub
+    override suspend fun search(query: String, page: Int): List<SearchResponse> {
         val url = "$mainUrl/index.php?do=search&subaction=search&story=$query"
         val doc = app.get(url).document
         
@@ -63,13 +64,13 @@ class CineblogProvider : MainAPI() {
         val doc = app.get(url).document
         val title = doc.selectFirst("h1")?.text()?.trim() ?: return null
         
-        // POSTER: Estrae l'immagine dalla classe ._player-cover fornita nell'HTML 
+        // Risolto errore 'cite': i selettori CSS sono stati ripuliti
         val poster = fixUrlNull(
             doc.selectFirst("img._player-cover")?.attr("src") 
-            ?: doc.selectFirst(".story-poster img, .m-img img, img[itemprop=image]")?.attr("src")
+            ?: doc.selectFirst(".story-poster img, .m-img img, img[itemprop='image']")?.attr("src")
         )
         
-        val plot = doc.selectFirst("meta[name=description]")?.attr("content") [cite: 1]
+        val plot = doc.selectFirst("meta[name='description']")?.attr("content")
         val isSerie = url.contains("/serie-tv/") || doc.select("#tv_tabs").isNotEmpty()
 
         return if (isSerie) {
@@ -98,7 +99,6 @@ class CineblogProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // Se il link è già esterno, caricalo direttamente
         if (data.startsWith("http") && !data.contains(mainUrl)) {
             loadExtractor(data, data, subtitleCallback, callback)
             return true
@@ -106,18 +106,18 @@ class CineblogProvider : MainAPI() {
 
         val doc = app.get(data).document
         
-        // Estrazione dai mirror del player (supervideo, dropload, etc.) 
+        // Estrazione dai mirror del player (supervideo, dropload, etc.)
         doc.select("ul._player-mirrors li").forEach { li ->
-            val link = li.attr("data-link") [cite: 3, 4, 5]
-            if (link.isNotEmpty() && !link.contains("mostraguarda.stream")) { // Escludiamo il Server 4K che spesso è protetto
+            val link = li.attr("data-link")
+            if (link.isNotBlank() && !link.contains("mostraguarda.stream")) {
                 loadExtractor(fixUrl(link), data, subtitleCallback, callback)
             }
         }
         
-        // Estrazione dai mirror nascosti (mixdrop, streamhg) 
+        // Estrazione dai mirror nascosti (mixdrop, streamhg)
         doc.select("div._hidden-mirrors li").forEach { li ->
-            val link = li.attr("data-link") [cite: 8, 9]
-            if (link.isNotEmpty()) {
+            val link = li.attr("data-link")
+            if (link.isNotBlank()) {
                 loadExtractor(fixUrl(link), data, subtitleCallback, callback)
             }
         }
