@@ -14,37 +14,54 @@ class CineblogProvider : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
         val doc = app.get(mainUrl).document
-        val items = doc.select(".promo-item, .movie-item, .m-item").mapNotNull {
+        val items = doc.select(".promo-item, .movie-item, .m-item, article.short").mapNotNull {
             it.toSearchResult()
         }.distinctBy { it.url }
 
         return newHomePageResponse(listOf(HomePageList("In Evidenza", items)), false)
     }
 
-    // Questa funzione ora segue esattamente la firma richiesta da MainAPI
+    override suspend fun search(query: String): List<SearchResponse> {
+        return search(query, 1)
+    }
+
     override suspend fun search(query: String, page: Int): List<SearchResponse> {
-        // Calcoliamo lo start per il motore DLE (solitamente page 1 = 1, page 2 = 2...)
-        val url = "$mainUrl/index.php?do=search&subaction=search&story=$query&search_start=$page"
-        val doc = app.get(url).document
+        // Calcolo dei parametri basato sul file cerca.txt fornito
+        // Pagina 1 -> result_from = 1, Pagina 2 -> result_from = 11, ecc.
+        val resultFrom = ((page - 1) * 10) + 1
         
-        // Estraiamo i risultati
-        return doc.select(".m-item, .movie-item, article").mapNotNull {
+        // Il sito usa una richiesta POST per la ricerca
+        val response = app.post(
+            "$mainUrl/index.php?do=search",
+            data = mapOf(
+                "do" to "search",
+                "subaction" to "search",
+                "search_start" to page.toString(),
+                "full_search" to "0",
+                "result_from" to resultFrom.toString(),
+                "story" to query
+            )
+        )
+        
+        val doc = response.document
+        // Selettore aggiornato basato sulla struttura <article class="short block-list">
+        return doc.select("article.short, .m-item, .movie-item").mapNotNull {
             it.toSearchResult()
         }.distinctBy { it.url }
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        val a = this.selectFirst("a") ?: return null
+        // Selettore basato su story-heading trovato nel tuo file
+        val a = this.selectFirst(".story-heading a, h2 a, h3 a, a") ?: return null
         val href = fixUrl(a.attr("href"))
         
         if (href.contains("/tags/") || href.contains("/category/")) return null
 
-        val title = this.selectFirst("h2, h3, .m-title")?.text() 
-            ?: a.attr("title").ifEmpty { a.text() }
-        
-        if (title.isNullOrBlank()) return null
+        val title = a.text().trim()
+        if (title.isBlank()) return null
 
-        val img = this.selectFirst("img")
+        // Selettore poster aggiornato per story-cover
+        val img = this.selectFirst(".story-cover img, img")
         val posterUrl = fixUrlNull(
             img?.attr("data-src") ?: img?.attr("src")
         )
@@ -64,18 +81,21 @@ class CineblogProvider : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse? {
         val doc = app.get(url).document
-        val title = doc.selectFirst("h1")?.text()?.trim() ?: return null
-        val poster = fixUrlNull(doc.selectFirst(".film-poster img, .m-img img")?.attr("src"))
-        val plot = doc.selectFirst("meta[name=description]")?.attr("content")
+        val title = doc.selectFirst("h1, .story-heading")?.text()?.trim() ?: return null
+        val poster = fixUrlNull(doc.selectFirst(".story-cover img, .film-poster img")?.attr("src"))
+        val plot = doc.selectFirst(".story, meta[name=description]")?.text() ?: 
+                   doc.selectFirst("meta[name=description]")?.attr("content")
         
-        val isSerie = url.contains("/serie-tv/") || doc.select("#tv_tabs").isNotEmpty()
+        val isSerie = url.contains("/serie-tv/") || doc.select("#tv_tabs, .episodes-list").isNotEmpty()
 
         return if (isSerie) {
-            val episodes = doc.select(".tt_series li, .episodes-list li").mapNotNull { li ->
-                val link = li.selectFirst("a")
+            val episodes = doc.select(".tt_series li, .episodes-list li, .story a[href*='episodio']").mapNotNull { li ->
+                val link = if (li.tagName() == "a") li else li.selectFirst("a")
                 if (link != null) {
-                    val epData = link.attr("data-link").ifEmpty { link.attr("href") }
-                    newEpisode(epData) { this.name = link.text() }
+                    val epData = link.attr("href")
+                    newEpisode(epData) { 
+                        this.name = link.text().trim()
+                    }
                 } else null
             }
             newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
@@ -96,15 +116,18 @@ class CineblogProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
+        // Se i dati sono già un link diretto a un estrattore
         if (data.startsWith("http") && !data.contains(mainUrl)) {
             loadExtractor(data, data, subtitleCallback, callback)
             return true
         }
 
         val doc = app.get(data).document
-        doc.select("a[href*='mixdrop'], a[href*='supervideo'], a[href*='vidoza']")
+        // Cerca i link ai video host comuni nel testo della pagina
+        doc.select("a[href*='mixdrop'], a[href*='supervideo'], a[href*='vidoza'], a[href*='streamtape']")
             .forEach { 
                 val link = it.attr("href")
+                // Gestione del redirect "/vai/" tipico di Cineblog
                 val finalUrl = if (link.contains("/vai/")) {
                     try { app.get(link).url } catch (e: Exception) { link }
                 } else link
