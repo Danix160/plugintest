@@ -24,8 +24,8 @@ class CineblogProvider : MainAPI() {
    override suspend fun search(query: String): List<SearchResponse> {
     val allResults = mutableListOf<SearchResponse>()
     
-    // Ciclo per caricare le prime 3 pagine del sito cineblog
-    for (page in 1..3) {
+    // Ciclo per caricare le prime 7 pagine del sito cineblog
+    for (page in 1..5) {
         try {
             val pagedResults = app.post(
                 "$mainUrl/index.php?do=search",
