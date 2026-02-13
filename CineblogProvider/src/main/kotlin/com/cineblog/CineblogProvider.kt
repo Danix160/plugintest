@@ -67,15 +67,26 @@ class CineblogProvider : MainAPI() {
         )
         
         val plot = doc.selectFirst("meta[name='description']")?.attr("content")
-        val isSerie = url.contains("/serie-tv/") || doc.select("#tv_tabs").isNotEmpty()
+        val isSerie = url.contains("/serie-tv/") || doc.select("#tv_tabs, .tt_series, .episodes-list").isNotEmpty()
 
         return if (isSerie) {
             val episodes = doc.select(".tt_series li, .episodes-list li").mapNotNull { li ->
                 val link = li.selectFirst("a")
                 if (link != null) {
                     val epData = link.attr("data-link").ifEmpty { link.attr("href") }
-                    // Usiamo fixUrl per assicurarci che il link dell'episodio sia completo
-                    newEpisode(fixUrl(epData)) { this.name = link.text().trim() }
+                    val fullText = link.text().trim()
+                    
+                    // Regex per estrarre Stagione (s) ed Episodio (e) dal testo (es. "1x05")
+                    val match = Regex("""(\d+)[xX](\d+)""").find(fullText)
+                    val s = match?.groupValues?.getOrNull(1)?.toIntOrNull()
+                    val e = match?.groupValues?.getOrNull(2)?.toIntOrNull()
+
+                    newEpisode(fixUrl(epData)) { 
+                        // Puliamo il nome dell'episodio rimuovendo la parte "1x05 -"
+                        this.name = fullText.replace(Regex("""\d+[xX]\d+\s*-\s*"""), "").trim()
+                        this.season = s
+                        this.episode = e
+                    }
                 } else null
             }
             newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
@@ -83,7 +94,6 @@ class CineblogProvider : MainAPI() {
                 this.plot = plot
             }
         } else {
-            // Per i film passiamo l'URL semplice, la logica del player la gestiamo in loadLinks
             newMovieLoadResponse(title, url, TvType.Movie, url) {
                 this.posterUrl = poster
                 this.plot = plot
@@ -97,18 +107,14 @@ class CineblogProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // Se il link non è di cineblog (es. è già un link diretto a un host), lo carichiamo
+        // Caricamento diretto se è già un link esterno
         if (data.startsWith("http") && !data.contains("cineblog001") && !data.contains("mostraguarda")) {
             loadExtractor(data, data, subtitleCallback, callback)
         }
 
-        // Scarichiamo la pagina (che sia l'URL del film o l'URL di un episodio)
         var doc = app.get(fixUrl(data)).document
         
-        // --- LOGICA COMBINATA ---
-        
-        // 1. Controllo Fake Player (Tipico dei film)
-        // Se troviamo il tasto che punta al player reale (film2.txt), ricarichiamo il doc
+        // GESTIONE FAKE PLAYER (Salto da film.txt a film2.txt)
         val realUrl = doc.selectFirst(".open-fake-url")?.attr("data-url")
             ?: doc.selectFirst("iframe[src*='mostraguarda']")?.attr("src")
             
@@ -116,7 +122,7 @@ class CineblogProvider : MainAPI() {
             doc = app.get(fixUrl(realUrl)).document
         }
 
-        // 2. Estrazione Mirror (Valido sia per film2.txt che per pagine episodi serie TV)
+        // Estrazione Mirror da attributi data-link
         doc.select("li[data-link], a[data-link]").forEach { el ->
             val link = el.attr("data-link")
             if (link.isNotBlank() && !link.contains("mostraguarda.stream")) {
@@ -124,7 +130,7 @@ class CineblogProvider : MainAPI() {
             }
         }
 
-        // 3. Fallback per iframe diretti (es. Supervideo embed)
+        // Fallback per iframe diretti (es. Supervideo, Voe, etc.)
         doc.select("iframe#_player, iframe[src*='embed']").forEach { iframe ->
             val src = iframe.attr("src")
             if (src.isNotBlank() && !src.contains("facebook") && !src.contains("google")) {
