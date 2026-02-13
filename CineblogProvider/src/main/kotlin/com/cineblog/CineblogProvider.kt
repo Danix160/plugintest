@@ -21,49 +21,40 @@ class CineblogProvider : MainAPI() {
         return newHomePageResponse(listOf(HomePageList("In Evidenza", items)), false)
     }
 
-   override suspend fun search(query: String): List<SearchResponse> {
-    val allResults = mutableListOf<SearchResponse>()
-    
-    // Ciclo per caricare le prime 7 pagine del sito cineblog
-    for (page in 1..5) {
-        try {
-            val pagedResults = app.post(
-                "$mainUrl/index.php?do=search",
-                data = mapOf(
-                    "do" to "search",
-                    "subaction" to "search",
-                    "search_start" to "$page",
-                    "full_search" to "0",
-                    "result_from" to "${(page - 1) * 20 + 1}",
-                    "story" to query
-                )
-            ).document.select(".m-item, .movie-item, article").mapNotNull {
-                it.toSearchResult()
+    override suspend fun search(query: String): List<SearchResponse> {
+        val allResults = mutableListOf<SearchResponse>()
+        for (page in 1..5) {
+            try {
+                val pagedResults = app.post(
+                    "$mainUrl/index.php?do=search",
+                    data = mapOf(
+                        "do" to "search",
+                        "subaction" to "search",
+                        "search_start" to "$page",
+                        "full_search" to "0",
+                        "result_from" to "${(page - 1) * 20 + 1}",
+                        "story" to query
+                    )
+                ).document.select(".m-item, .movie-item, article").mapNotNull {
+                    it.toSearchResult()
+                }
+                if (pagedResults.isEmpty()) break
+                allResults.addAll(pagedResults)
+            } catch (e: Exception) {
+                break
             }
-            
-            if (pagedResults.isEmpty()) break // Se una pagina è vuota, si ferma
-            allResults.addAll(pagedResults)
-        } catch (e: Exception) {
-            break
         }
+        return allResults.distinctBy { it.url }
     }
-    
-    return allResults.distinctBy { it.url }
-}
+
     private fun Element.toSearchResult(): SearchResponse? {
         val a = this.selectFirst("a") ?: return null
         val href = fixUrl(a.attr("href"))
-        
         if (href.contains("/tags/") || href.contains("/category/")) return null
-
-        val title = this.selectFirst("h2, h3, .m-title")?.text() 
-            ?: a.attr("title").ifEmpty { a.text() }
-        
+        val title = this.selectFirst("h2, h3, .m-title")?.text() ?: a.attr("title").ifEmpty { a.text() }
         if (title.isBlank()) return null
-
         val img = this.selectFirst("img")
         val posterUrl = fixUrlNull(img?.attr("data-src") ?: img?.attr("src"))
-
         val isTv = href.contains("/serie-tv/") || title.contains("serie tv", true)
 
         return if (isTv) {
@@ -94,7 +85,23 @@ class CineblogProvider : MainAPI() {
                 val link = li.selectFirst("a")
                 if (link != null) {
                     val epData = link.attr("data-link").ifEmpty { link.attr("href") }
-                    newEpisode(fixUrl(epData)) { this.name = link.text().trim() }
+                    val fullText = link.text().trim() // Esempio: "1x05" o "Stagione 1 Episodio 5"
+
+                    // Logica per estrarre Stagione ed Episodio dal testo
+                    val sRegex = Regex("""(\d+)x(\d+)""")
+                    val match = sRegex.find(fullText)
+                    
+                    val s = match?.groupValues?.get(1)?.toIntOrNull() 
+                        ?: fullText.substringAfter("Stagione ").substringBefore(" ").toIntOrNull()
+                    val e = match?.groupValues?.get(2)?.toIntOrNull()
+                        ?: fullText.substringAfter("Episodio ").toIntOrNull()
+
+                    newEpisode(fixUrl(epData)) { 
+                        this.name = if (e != null) "Episodio $e" else fullText
+                        this.season = s
+                        this.episode = e
+                        this.posterUrl = poster // Imposta la miniatura dell'episodio
+                    }
                 } else null
             }
             newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
@@ -120,7 +127,6 @@ class CineblogProvider : MainAPI() {
         }
 
         var doc = app.get(fixUrl(data)).document
-        
         val realUrl = doc.selectFirst(".open-fake-url")?.attr("data-url")
             ?: doc.selectFirst("iframe[src*='mostraguarda']")?.attr("src")
             
@@ -141,7 +147,6 @@ class CineblogProvider : MainAPI() {
                 loadExtractor(fixUrl(src), data, subtitleCallback, callback)
             }
         }
-
         return true
     }
 }
