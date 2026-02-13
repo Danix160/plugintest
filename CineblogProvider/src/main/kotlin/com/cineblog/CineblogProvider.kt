@@ -54,8 +54,9 @@ class CineblogProvider : MainAPI() {
 
         var title = this.selectFirst("h2, h3, .m-title")?.text() ?: a.attr("title").ifEmpty { a.text() }
         
-        // --- PULIZIA TITOLO SEARCH ---
-        title = title.replace(Regex("""(?i)(\d+x\d+|Stagion[ei]\s+\d+)"""), "").trim()
+        // Pulizia titolo nei risultati di ricerca (rimuove 4x04, streaming e punteggiatura finale)
+        title = title.replace(Regex("""(?i)(\d+x\d+|Stagion[ei]\s+\d+|streaming)"""), "")
+                     .replace(Regex("""[\-\s,]+$"""), "").trim()
 
         val img = this.selectFirst("img")
         val posterUrl = fixUrlNull(img?.attr("data-src") ?: img?.attr("src"))
@@ -71,20 +72,22 @@ class CineblogProvider : MainAPI() {
     override suspend fun load(url: String): LoadResponse? {
         val doc = app.get(url).document
         
-        // --- PULIZIA TITOLO LOAD ---
+        // --- PULIZIA TITOLO AVANZATA ---
         var title = doc.selectFirst("h1")?.text()?.trim() ?: return null
-        title = title.replace(Regex("""(?i)(\s+\d+x\d+.*|Stagion[ei]\s+\d+.*)"""), "").trim()
+        // Rimuove 4x04, Stagione X, la parola "streaming" e infine pulisce trattini/virgole/spazi alla fine
+        title = title.replace(Regex("""(?i)(\s+\d+x\d+.*|Stagion[ei]\s+\d+.*|streaming)"""), "")
+                     .replace(Regex("""[\-\s,]+$"""), "").trim()
         
         val poster = fixUrlNull(
             doc.selectFirst("img._player-cover")?.attr("src") 
             ?: doc.selectFirst(".story-poster img, .m-img img, img[itemprop='image']")?.attr("src")
         )
 
-        // --- PULIZIA TRAMA ---
+        // --- PULIZIA TRAMA AVANZATA ---
         var plot = doc.selectFirst("meta[name='description']")?.attr("content")
-        plot = plot?.replace(Regex("""(?i).*?streaming.*?serie tv.*?cb01.*?cineblog\d*01\s*-?\s*"""), "")?.trim()
-        // Se la pulizia Regex è troppo aggressiva, un fallback comune è rimuovere tutto fino al primo punto o trattino
-        if (plot?.contains("–") == true) plot = plot.substringAfter("–").trim()
+        // Rimuove lo spam SEO e pulisce virgole/trattini/spazi iniziali
+        plot = plot?.replace(Regex("""(?i).*?streaming.*?serie tv.*?cb01.*?cineblog\d*01\s*"""), "")
+                   ?.replace(Regex("""^[\s,–\-]+"""), "")?.trim()
 
         val seasonContainer = doc.selectFirst(".tt_season")
         
