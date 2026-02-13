@@ -1,6 +1,8 @@
 **⚠️ IL MIO PRIMO PLUGIN DI CLOUDSTREAM**
 
-Contiene per il momento il sito ToonItalia dove si possono trovare centinaia di Film, Serie e Cartoni (Nuovi e Vecchi).
+Contiene per il momento:
+-ToonItalia (Cartoni, Anime, Film, Serie TV)
+-Cineblog (Cartoni, Film, Serie TV) "https://cineblog001.club/"
 
 ### Clicca su Gumball per installare la repo
 <p align="center">
