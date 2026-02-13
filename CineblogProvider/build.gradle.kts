@@ -7,6 +7,9 @@ android {
         freeCompilerArgs = freeCompilerArgs + "-Xskip-metadata-version-check"
     }
 }
+dependencies {
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4"
+}
 cloudstream {
     extra["prefix"] = "Cineblog"
     extra["displayName"] = "Cineblog"
