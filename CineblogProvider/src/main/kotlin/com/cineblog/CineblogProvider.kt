@@ -23,6 +23,8 @@ class CineblogProvider : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse> {
         val allResults = mutableListOf<SearchResponse>()
+        
+        // Ciclo per caricare le prime 5 pagine del sito
         for (page in 1..5) {
             try {
                 val pagedResults = app.post(
@@ -38,8 +40,10 @@ class CineblogProvider : MainAPI() {
                 ).document.select(".m-item, .movie-item, article").mapNotNull {
                     it.toSearchResult()
                 }
+                
                 if (pagedResults.isEmpty()) break
                 allResults.addAll(pagedResults)
+                if (pagedResults.size < 20) break
             } catch (e: Exception) {
                 break
             }
@@ -50,11 +54,17 @@ class CineblogProvider : MainAPI() {
     private fun Element.toSearchResult(): SearchResponse? {
         val a = this.selectFirst("a") ?: return null
         val href = fixUrl(a.attr("href"))
+        
         if (href.contains("/tags/") || href.contains("/category/")) return null
-        val title = this.selectFirst("h2, h3, .m-title")?.text() ?: a.attr("title").ifEmpty { a.text() }
+
+        val title = this.selectFirst("h2, h3, .m-title")?.text() 
+            ?: a.attr("title").ifEmpty { a.text() }
+        
         if (title.isBlank()) return null
+
         val img = this.selectFirst("img")
         val posterUrl = fixUrlNull(img?.attr("data-src") ?: img?.attr("src"))
+
         val isTv = href.contains("/serie-tv/") || title.contains("serie tv", true)
 
         return if (isTv) {
@@ -78,44 +88,43 @@ class CineblogProvider : MainAPI() {
         )
         
         val plot = doc.selectFirst("meta[name='description']")?.attr("content")
-        val isSerie = url.contains("/serie-tv/") || doc.select("#tv_tabs").isNotEmpty() [cite: 9, 10]
+        val isSerie = url.contains("/serie-tv/") || doc.select("#tv_tabs").isNotEmpty()
 
         return if (isSerie) {
             val episodes = doc.select(".tt_series li, .episodes-list li").mapNotNull { li ->
                 val link = li.selectFirst("a")
                 if (link != null) {
-                    val epData = link.attr("data-link").ifEmpty { link.attr("href") } [cite: 11]
+                    val epData = link.attr("data-link").ifEmpty { link.attr("href") }
                     val fullText = link.text().trim() 
 
-                    // Estrazione migliorata: cerca il formato "1x05"
+                    // Estrazione Stagione ed Episodio (es: "1x05")
                     val sRegex = Regex("""(\d+)x(\d+)""")
                     val match = sRegex.find(fullText)
                     
-                    // Se non trova "1x05", prova a cercare "Stagione 1" e "Episodio 5"
                     val s = match?.groupValues?.get(1)?.toIntOrNull() 
                         ?: fullText.substringAfter("Stagione ", "").substringBefore(" ", "").toIntOrNull()
-                        ?: 1 // Default a Stagione 1 se non riesce a leggere nulla
+                        ?: 1 // Se non trova la stagione, mette tutto in Stagione 1
 
                     val e = match?.groupValues?.get(2)?.toIntOrNull()
                         ?: fullText.substringAfter("Episodio ", "").toIntOrNull()
-                        ?: fullText.filter { it.isDigit() }.toIntOrNull() // Ultima spiaggia: solo numeri
+                        ?: fullText.filter { it.isDigit() }.toIntOrNull()
 
                     newEpisode(fixUrl(epData)) { 
                         this.name = if (e != null) "Episodio $e" else fullText
                         this.season = s
                         this.episode = e
-                        this.posterUrl = poster 
+                        this.posterUrl = poster // Attiva la miniatura dell'episodio
                     }
                 } else null
             }
             newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
                 this.posterUrl = poster
-                this.plot = plot [cite: 12]
+                this.plot = plot
             }
         } else {
             newMovieLoadResponse(title, url, TvType.Movie, url) {
                 this.posterUrl = poster
-                this.plot = plot [cite: 13]
+                this.plot = plot
             }
         }
     }
@@ -131,6 +140,7 @@ class CineblogProvider : MainAPI() {
         }
 
         var doc = app.get(fixUrl(data)).document
+        
         val realUrl = doc.selectFirst(".open-fake-url")?.attr("data-url")
             ?: doc.selectFirst("iframe[src*='mostraguarda']")?.attr("src")
             
@@ -151,6 +161,7 @@ class CineblogProvider : MainAPI() {
                 loadExtractor(fixUrl(src), data, subtitleCallback, callback)
             }
         }
+
         return true
     }
 }
