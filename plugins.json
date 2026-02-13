@@ -3,7 +3,7 @@
         "iconUrl": "https://cineblog001.club/templates/CB01/img/logo.png",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/Danix160/plugintest",
-        "fileSize": 13570,
+        "fileSize": 13795,
         "status": 1,
         "language": "it",
         "authors": [
@@ -13,7 +13,7 @@
             "Movie",
             "TvSeries"
         ],
-        "version": 41,
+        "version": 42,
         "internalName": "CineblogProvider",
         "description": "cineblog001.club",
         "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/CineblogProvider.cs3",
