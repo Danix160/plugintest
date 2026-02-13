@@ -52,12 +52,13 @@ class CineblogProvider : MainAPI() {
         val href = fixUrl(a.attr("href"))
         if (href.contains("/tags/") || href.contains("/category/")) return null
 
-        val title = this.selectFirst("h2, h3, .m-title")?.text() ?: a.attr("title").ifEmpty { a.text() }
-        if (title.isBlank()) return null
+        var title = this.selectFirst("h2, h3, .m-title")?.text() ?: a.attr("title").ifEmpty { a.text() }
+        
+        // --- PULIZIA TITOLO SEARCH ---
+        title = title.replace(Regex("""(?i)(\d+x\d+|Stagion[ei]\s+\d+)"""), "").trim()
 
         val img = this.selectFirst("img")
         val posterUrl = fixUrlNull(img?.attr("data-src") ?: img?.attr("src"))
-        
         val isTv = href.contains("/serie-tv/") || title.contains("serie tv", true)
 
         return if (isTv) {
@@ -69,31 +70,33 @@ class CineblogProvider : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse? {
         val doc = app.get(url).document
-        val title = doc.selectFirst("h1")?.text()?.trim() ?: return null
+        
+        // --- PULIZIA TITOLO LOAD ---
+        var title = doc.selectFirst("h1")?.text()?.trim() ?: return null
+        title = title.replace(Regex("""(?i)(\s+\d+x\d+.*|Stagion[ei]\s+\d+.*)"""), "").trim()
+        
         val poster = fixUrlNull(
             doc.selectFirst("img._player-cover")?.attr("src") 
             ?: doc.selectFirst(".story-poster img, .m-img img, img[itemprop='image']")?.attr("src")
         )
-        val plot = doc.selectFirst("meta[name='description']")?.attr("content")
-        
-        // IDENTIFICAZIONE SERIE: solo se esiste il blocco stagioni specifico di Cineblog
+
+        // --- PULIZIA TRAMA ---
+        var plot = doc.selectFirst("meta[name='description']")?.attr("content")
+        plot = plot?.replace(Regex("""(?i).*?streaming.*?serie tv.*?cb01.*?cineblog\d*01\s*-?\s*"""), "")?.trim()
+        // Se la pulizia Regex è troppo aggressiva, un fallback comune è rimuovere tutto fino al primo punto o trattino
+        if (plot?.contains("–") == true) plot = plot.substringAfter("–").trim()
+
         val seasonContainer = doc.selectFirst(".tt_season")
         
         return if (seasonContainer != null) {
             val episodesList = mutableListOf<Episode>()
-            
-            // Troviamo i tab delle stagioni (es: #season-1, #season-2)
             val seasonPanes = doc.select(".tt_series .tab-content .tab-pane")
             
             seasonPanes.forEachIndexed { index, pane ->
                 val seasonNum = index + 1
-                
-                // PRENDIAMO SOLO GLI EPISODI REALI:
-                // Cercano i link che hanno l'ID che inizia con "serie-" (es. id="serie-1_1")
-                // Questo esclude i widget correlati e i suggerimenti in fondo alla pagina
                 pane.select("a[id^=serie-]").forEach { a ->
                     val epData = a.attr("data-link").ifEmpty { a.attr("href") }
-                    val dataNum = a.attr("data-num") // Es: "1x1"
+                    val dataNum = a.attr("data-num")
                     
                     val epNum = if (dataNum.contains("x")) {
                         dataNum.substringAfter("x").toIntOrNull()
@@ -115,7 +118,6 @@ class CineblogProvider : MainAPI() {
                 this.plot = plot
             }
         } else {
-            // Se non c'è il blocco .tt_season, è sicuramente un film
             newMovieLoadResponse(title, url, TvType.Movie, url) {
                 this.posterUrl = poster
                 this.plot = plot
@@ -140,7 +142,6 @@ class CineblogProvider : MainAPI() {
             
         val targetDoc = if (!realUrl.isNullOrBlank()) app.get(fixUrl(realUrl)).document else doc
 
-        // Estrae i mirror (Mixdrop, Dropload, ecc)
         targetDoc.select("li[data-link], a[data-link], a.mr, iframe#_player, iframe[src*='embed']").forEach { el ->
             val link = el.attr("data-link").ifEmpty { el.attr("src") }
             if (link.isNotBlank() && !link.contains("mostraguarda.stream") && !link.contains("facebook") && !link.contains("google")) {
