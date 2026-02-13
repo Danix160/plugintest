@@ -1,9 +1,5 @@
 **⚠️ IL MIO PRIMO PLUGIN DI CLOUDSTREAM**
 
-Contiene per il momento:
--ToonItalia (Cartoni, Anime, Film, Serie TV)
--Cineblog (Cartoni, Film, Serie TV) "https://cineblog001.club/"
-
 ### Clicca su Gumball per installare la repo
 <p align="center">
   <a href="https://danix160.github.io/plugintest/install.html">
@@ -13,6 +9,12 @@ Contiene per il momento:
   <b><a href="https://danix160.github.io/plugintest/install.html">👉 CLICCA QUI PER INSTALLARE, SE L'IMMAGINE NON DOVESSE FUNZIONARE 👈</a></b>
 </p>
 
+### Plugin
+Questi sono i plugin disponibili al momento
+| **Nome**           | **Sito**                                               |            **Categorie**            | **Lingua** | **Funzionante** | **Note**                                                                                                                                                                                                  |
+|--------------------|--------------------------------------------------------|:-----------------------------------:|:----------:|:---------------:|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|  
+| Cineblog           | https://cineblog001.club/                              | Film, TV Show, Cartoni              |    🇮🇹    |        ✅        |                                                                                                                                                                                                           |
+| ToonItalia         | https://toonitalia.xyz/                                | Anime, Cartoni, Film, Serie TV      |    🇮🇹    |        ✅        |    |
 ---
 
 ### Istruzioni Manuali
