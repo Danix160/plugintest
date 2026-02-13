@@ -33,7 +33,6 @@ class CineblogProvider : MainAPI() {
     private fun Element.toSearchResult(): SearchResponse? {
         val a = this.selectFirst("a") ?: return null
         val href = fixUrl(a.attr("href"))
-        
         if (href.contains("/tags/") || href.contains("/category/")) return null
 
         val title = this.selectFirst("h2, h3, .m-title")?.text() 
@@ -42,20 +41,14 @@ class CineblogProvider : MainAPI() {
         if (title.isBlank()) return null
 
         val img = this.selectFirst("img")
-        val posterUrl = fixUrlNull(
-            img?.attr("data-src") ?: img?.attr("src")
-        )
+        val posterUrl = fixUrlNull(img?.attr("data-src") ?: img?.attr("src"))
 
         val isTv = href.contains("/serie-tv/") || title.contains("serie tv", true)
 
         return if (isTv) {
-            newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
-                this.posterUrl = posterUrl
-            }
+            newTvSeriesSearchResponse(title, href, TvType.TvSeries) { this.posterUrl = posterUrl }
         } else {
-            newMovieSearchResponse(title, href, TvType.Movie) {
-                this.posterUrl = posterUrl
-            }
+            newMovieSearchResponse(title, href, TvType.Movie) { this.posterUrl = posterUrl }
         }
     }
 
@@ -84,8 +77,9 @@ class CineblogProvider : MainAPI() {
                 this.plot = plot
             }
         } else {
-            // Per i film, passiamo l'URL della pagina come 'data' per loadLinks
-            newMovieLoadResponse(title, url, TvType.Movie, url) {
+            // Per i film cerchiamo l'iframe del player nella pagina
+            val movieData = doc.selectFirst("iframe[src*='mostraguarda'], iframe#_player")?.attr("src") ?: url
+            newMovieLoadResponse(title, url, TvType.Movie, movieData) {
                 this.posterUrl = poster
                 this.plot = plot
             }
@@ -98,35 +92,34 @@ class CineblogProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // Se il data non è un URL del nostro sito, proviamo a caricarlo direttamente
-        if (data.startsWith("http") && !data.contains("cineblog001")) {
-            loadExtractor(data, data, subtitleCallback, callback)
-            return true
+        // 1. Carichiamo la pagina passata (data può essere l'iframe o l'URL film)
+        var doc = app.get(fixUrl(data)).document
+
+        // 2. GESTIONE FAKE PLAYER (film.txt): 
+        // Se troviamo il tasto che apre il vero player, carichiamo quella nuova pagina
+        val realUrl = doc.selectFirst(".open-fake-url")?.attr("data-url")
+            ?: doc.selectFirst("iframe#_player")?.attr("src")
+        
+        if (!realUrl.isNullOrBlank()) {
+            doc = app.get(fixUrl(realUrl)).document
         }
 
-        val doc = app.get(data).document
-        
-        // 1. Estrazione dai Mirror Principali (film2.txt) [cite: 91, 92, 93]
-        doc.select("ul._player-mirrors li[data-link]").forEach { li ->
+        // 3. ESTRAZIONE MIRROR (film2.txt)
+        // Estraiamo da tutti i li che hanno data-link
+        doc.select("li[data-link]").forEach { li ->
             val link = li.attr("data-link")
             if (link.isNotBlank() && !link.contains("mostraguarda.stream")) {
                 loadExtractor(fixUrl(link), data, subtitleCallback, callback)
             }
         }
 
-        // 2. Estrazione dai Server Alternativi (nascosti) [cite: 96, 97, 98]
-        doc.select("div._hidden-mirrors li[data-link]").forEach { li ->
-            val link = li.attr("data-link")
-            if (link.isNotBlank()) {
-                loadExtractor(fixUrl(link), data, subtitleCallback, callback)
-            }
-        }
-
-        // 3. Fallback per player classici o iframe (se presenti) 
-        doc.select("iframe#_player, iframe[src*='embed']").forEach { iframe ->
-            val src = iframe.attr("src")
-            if (src.isNotBlank()) {
-                loadExtractor(fixUrl(src), data, subtitleCallback, callback)
+        // 4. Fallback per iframe diretti (se non ci sono mirror list)
+        if (doc.select("li[data-link]").isEmpty()) {
+            doc.select("iframe").forEach { iframe ->
+                val src = iframe.attr("src")
+                if (src.isNotBlank() && !src.contains("facebook") && !src.contains("google")) {
+                    loadExtractor(fixUrl(src), data, subtitleCallback, callback)
+                }
             }
         }
 
