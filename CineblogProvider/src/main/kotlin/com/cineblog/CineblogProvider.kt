@@ -75,16 +75,18 @@ class CineblogProvider : MainAPI() {
         )
         val plot = doc.selectFirst("meta[name='description']")?.attr("content")
         
-        // Controllo se è una serie TV basandoci su URL o presenza di tab stagioni
-        val isSerie = url.contains("/serie-tv/") || doc.select(".tab-content, #tv_tabs, .tv_tabs_container").isNotEmpty()
+        val isSerie = url.contains("/serie-tv/") || doc.select(".tv_tabs_container").isNotEmpty()
 
         return if (isSerie) {
             val episodesList = mutableListOf<Episode>()
             
-            // Selezioniamo i tab-pane all'interno dei contenitori specifici delle serie
-            val seasonTabs = doc.select(".tv_tabs_container .tab-pane, .tab-content .tab-pane, #tv_tabs .tab-pane")
+            // FILTRO CRUCIALE: Cerchiamo i tab SOLO dentro il contenitore principale della serie
+            // Ignoriamo i widget "correlati" o "raccomandati" che stanno fuori da questo ID
+            val mainContainer = doc.selectFirst("#tv_tabs, .tv_tabs_container, .video-player-tabs")
             
-            // Filtriamo solo i tab che contengono effettivamente dei link (escludendo commenti o altro)
+            val seasonTabs = mainContainer?.select(".tab-pane") ?: doc.select(".tv_tabs_container .tab-pane")
+            
+            // Verifichiamo che i tab appartengano effettivamente alla serie (devono contenere link con numeri episodio)
             val validSeasons = seasonTabs.filter { it.select("li a").isNotEmpty() }
 
             validSeasons.forEachIndexed { index, seasonElement ->
@@ -105,23 +107,9 @@ class CineblogProvider : MainAPI() {
                             this.name = "Episodio $epNum"
                             this.season = seasonNum
                             this.episode = epNum
-                            this.posterUrl = poster // Poster su ogni episodio per visualizzazione a griglia
+                            this.posterUrl = poster 
                         })
                     }
-                }
-            }
-
-            // Fallback se la struttura a tab non viene trovata
-            if (episodesList.isEmpty()) {
-                doc.select(".episodes-list li, .tt_series li").forEachIndexed { index, li ->
-                    val a = li.selectFirst("a") ?: return@forEachIndexed
-                    val epData = a.attr("data-link").ifEmpty { a.attr("href") }
-                    episodesList.add(newEpisode(fixUrl(epData)) {
-                        this.name = a.text().trim()
-                        this.season = 1
-                        this.episode = index + 1
-                        this.posterUrl = poster
-                    })
                 }
             }
 
