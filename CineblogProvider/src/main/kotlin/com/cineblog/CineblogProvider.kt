@@ -21,7 +21,6 @@ class CineblogProvider : MainAPI() {
         return newHomePageResponse(listOf(HomePageList("In Evidenza", items)), false)
     }
 
-    // CORRETTO: Adesso la firma corrisponde esattamente a quella richiesta dall'SDK
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/index.php?do=search&subaction=search&story=$query"
         val doc = app.get(url).document
@@ -64,7 +63,6 @@ class CineblogProvider : MainAPI() {
         val doc = app.get(url).document
         val title = doc.selectFirst("h1")?.text()?.trim() ?: return null
         
-        // POSTER: Recupero dalla classe _player-cover come visto nel tuo HTML
         val poster = fixUrlNull(
             doc.selectFirst("img._player-cover")?.attr("src") 
             ?: doc.selectFirst(".story-poster img, .m-img img, img[itemprop='image']")?.attr("src")
@@ -86,6 +84,7 @@ class CineblogProvider : MainAPI() {
                 this.plot = plot
             }
         } else {
+            // Per i film, passiamo l'URL della pagina come 'data' per loadLinks
             newMovieLoadResponse(title, url, TvType.Movie, url) {
                 this.posterUrl = poster
                 this.plot = plot
@@ -99,18 +98,35 @@ class CineblogProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        if (data.startsWith("http") && !data.contains(mainUrl)) {
+        // Se il data non è un URL del nostro sito, proviamo a caricarlo direttamente
+        if (data.startsWith("http") && !data.contains("cineblog001")) {
             loadExtractor(data, data, subtitleCallback, callback)
             return true
         }
 
         val doc = app.get(data).document
         
-        // Estrazione dai mirror data-link (Film)
-        doc.select("ul._player-mirrors li, div._hidden-mirrors li").forEach { li ->
+        // 1. Estrazione dai Mirror Principali (film2.txt) [cite: 91, 92, 93]
+        doc.select("ul._player-mirrors li[data-link]").forEach { li ->
             val link = li.attr("data-link")
             if (link.isNotBlank() && !link.contains("mostraguarda.stream")) {
                 loadExtractor(fixUrl(link), data, subtitleCallback, callback)
+            }
+        }
+
+        // 2. Estrazione dai Server Alternativi (nascosti) [cite: 96, 97, 98]
+        doc.select("div._hidden-mirrors li[data-link]").forEach { li ->
+            val link = li.attr("data-link")
+            if (link.isNotBlank()) {
+                loadExtractor(fixUrl(link), data, subtitleCallback, callback)
+            }
+        }
+
+        // 3. Fallback per player classici o iframe (se presenti) 
+        doc.select("iframe#_player, iframe[src*='embed']").forEach { iframe ->
+            val src = iframe.attr("src")
+            if (src.isNotBlank()) {
+                loadExtractor(fixUrl(src), data, subtitleCallback, callback)
             }
         }
 
