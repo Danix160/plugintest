@@ -78,40 +78,44 @@ class CineblogProvider : MainAPI() {
         )
         
         val plot = doc.selectFirst("meta[name='description']")?.attr("content")
-        val isSerie = url.contains("/serie-tv/") || doc.select("#tv_tabs").isNotEmpty()
+        val isSerie = url.contains("/serie-tv/") || doc.select("#tv_tabs").isNotEmpty() [cite: 9, 10]
 
         return if (isSerie) {
             val episodes = doc.select(".tt_series li, .episodes-list li").mapNotNull { li ->
                 val link = li.selectFirst("a")
                 if (link != null) {
-                    val epData = link.attr("data-link").ifEmpty { link.attr("href") }
-                    val fullText = link.text().trim() // Esempio: "1x05" o "Stagione 1 Episodio 5"
+                    val epData = link.attr("data-link").ifEmpty { link.attr("href") } [cite: 11]
+                    val fullText = link.text().trim() 
 
-                    // Logica per estrarre Stagione ed Episodio dal testo
+                    // Estrazione migliorata: cerca il formato "1x05"
                     val sRegex = Regex("""(\d+)x(\d+)""")
                     val match = sRegex.find(fullText)
                     
+                    // Se non trova "1x05", prova a cercare "Stagione 1" e "Episodio 5"
                     val s = match?.groupValues?.get(1)?.toIntOrNull() 
-                        ?: fullText.substringAfter("Stagione ").substringBefore(" ").toIntOrNull()
+                        ?: fullText.substringAfter("Stagione ", "").substringBefore(" ", "").toIntOrNull()
+                        ?: 1 // Default a Stagione 1 se non riesce a leggere nulla
+
                     val e = match?.groupValues?.get(2)?.toIntOrNull()
-                        ?: fullText.substringAfter("Episodio ").toIntOrNull()
+                        ?: fullText.substringAfter("Episodio ", "").toIntOrNull()
+                        ?: fullText.filter { it.isDigit() }.toIntOrNull() // Ultima spiaggia: solo numeri
 
                     newEpisode(fixUrl(epData)) { 
                         this.name = if (e != null) "Episodio $e" else fullText
                         this.season = s
                         this.episode = e
-                        this.posterUrl = poster // Imposta la miniatura dell'episodio
+                        this.posterUrl = poster 
                     }
                 } else null
             }
             newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
                 this.posterUrl = poster
-                this.plot = plot
+                this.plot = plot [cite: 12]
             }
         } else {
             newMovieLoadResponse(title, url, TvType.Movie, url) {
                 this.posterUrl = poster
-                this.plot = plot
+                this.plot = plot [cite: 13]
             }
         }
     }
