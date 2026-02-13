@@ -21,83 +21,101 @@ class CineblogProvider : MainAPI() {
         return newHomePageResponse(listOf(HomePageList("In Evidenza", items)), false)
     }
 
-   override suspend fun search(query: String): List<SearchResponse> {
-    val allResults = mutableListOf<SearchResponse>()
-    
-    // Ciclo per caricare le prime 7 pagine del sito cineblog
-    for (page in 1..5) {
-        try {
-            val pagedResults = app.post(
-                "$mainUrl/index.php?do=search",
-                data = mapOf(
-                    "do" to "search",
-                    "subaction" to "search",
-                    "search_start" to "$page",
-                    "full_search" to "0",
-                    "result_from" to "${(page - 1) * 20 + 1}",
-                    "story" to query
-                )
-            ).document.select(".m-item, .movie-item, article").mapNotNull {
-                it.toSearchResult()
+    override suspend fun search(query: String): List<SearchResponse> {
+        val allResults = mutableListOf<SearchResponse>()
+        for (page in 1..5) {
+            try {
+                val pagedResults = app.post(
+                    "$mainUrl/index.php?do=search",
+                    data = mapOf(
+                        "do" to "search",
+                        "subaction" to "search",
+                        "search_start" to "$page",
+                        "full_search" to "0",
+                        "result_from" to "${(page - 1) * 20 + 1}",
+                        "story" to query
+                    )
+                ).document.select(".m-item, .movie-item, article").mapNotNull {
+                    it.toSearchResult()
+                }
+                if (pagedResults.isEmpty()) break
+                allResults.addAll(pagedResults)
+            } catch (e: Exception) {
+                break
             }
-            
-            if (pagedResults.isEmpty()) break // Se una pagina è vuota, si ferma
-            allResults.addAll(pagedResults)
-        } catch (e: Exception) {
-            break
         }
+        return allResults.distinctBy { it.url }
     }
-    
-    return allResults.distinctBy { it.url }
-}
+
     private fun Element.toSearchResult(): SearchResponse? {
         val a = this.selectFirst("a") ?: return null
         val href = fixUrl(a.attr("href"))
-        
         if (href.contains("/tags/") || href.contains("/category/")) return null
 
-        val title = this.selectFirst("h2, h3, .m-title")?.text() 
-            ?: a.attr("title").ifEmpty { a.text() }
-        
+        val title = this.selectFirst("h2, h3, .m-title")?.text() ?: a.attr("title").ifEmpty { a.text() }
         if (title.isBlank()) return null
 
         val img = this.selectFirst("img")
         val posterUrl = fixUrlNull(img?.attr("data-src") ?: img?.attr("src"))
-
         val isTv = href.contains("/serie-tv/") || title.contains("serie tv", true)
 
         return if (isTv) {
-            newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
-                this.posterUrl = posterUrl
-            }
+            newTvSeriesSearchResponse(title, href, TvType.TvSeries) { this.posterUrl = posterUrl }
         } else {
-            newMovieSearchResponse(title, href, TvType.Movie) {
-                this.posterUrl = posterUrl
-            }
+            newMovieSearchResponse(title, href, TvType.Movie) { this.posterUrl = posterUrl }
         }
     }
 
     override suspend fun load(url: String): LoadResponse? {
         val doc = app.get(url).document
         val title = doc.selectFirst("h1")?.text()?.trim() ?: return null
-        
         val poster = fixUrlNull(
             doc.selectFirst("img._player-cover")?.attr("src") 
             ?: doc.selectFirst(".story-poster img, .m-img img, img[itemprop='image']")?.attr("src")
         )
-        
         val plot = doc.selectFirst("meta[name='description']")?.attr("content")
-        val isSerie = url.contains("/serie-tv/") || doc.select("#tv_tabs").isNotEmpty()
+        val isSerie = url.contains("/serie-tv/") || doc.select(".tab-content .tab-pane, #tv_tabs").isNotEmpty()
 
         return if (isSerie) {
-            val episodes = doc.select(".tt_series li, .episodes-list li").mapNotNull { li ->
-                val link = li.selectFirst("a")
-                if (link != null) {
-                    val epData = link.attr("data-link").ifEmpty { link.attr("href") }
-                    newEpisode(fixUrl(epData)) { this.name = link.text().trim() }
-                } else null
+            val episodesList = mutableListOf<Episode>()
+            val seasonTabs = doc.select(".tab-content .tab-pane")
+
+            if (seasonTabs.isNotEmpty()) {
+                seasonTabs.forEachIndexed { index, seasonElement ->
+                    val seasonNum = index + 1
+                    seasonElement.select("ul li").forEach { li ->
+                        val a = li.selectFirst("a")
+                        val text = li.text()
+                        if (a != null) {
+                            val epData = a.attr("data-link").ifEmpty { a.attr("href") }
+                            // Estrae il numero dopo il punto (es: "1.5" -> 5)
+                            val epNum = Regex("""\d+\.(\d+)""").find(text)?.groupValues?.get(1)?.toIntOrNull()
+                                        ?: Regex("""(\d+)""").find(text)?.groupValues?.get(1)?.toIntOrNull() ?: 1
+                            
+                            episodesList.add(newEpisode(fixUrl(epData)) {
+                                this.name = "Episodio $epNum"
+                                this.season = seasonNum
+                                this.episode = epNum
+                                this.posterUrl = poster // Attiva la miniatura nel layout
+                            })
+                        }
+                    }
+                }
+            } else {
+                // Fallback per liste semplici
+                doc.select(".episodes-list li, .tt_series li").forEachIndexed { index, li ->
+                    val a = li.selectFirst("a") ?: return@forEachIndexed
+                    val epData = a.attr("data-link").ifEmpty { a.attr("href") }
+                    episodesList.add(newEpisode(fixUrl(epData)) {
+                        this.name = a.text().trim()
+                        this.season = 1
+                        this.episode = index + 1
+                        this.posterUrl = poster
+                    })
+                }
             }
-            newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
+
+            newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodesList.distinctBy { "${it.season}-${it.episode}" }) {
                 this.posterUrl = poster
                 this.plot = plot
             }
@@ -120,7 +138,6 @@ class CineblogProvider : MainAPI() {
         }
 
         var doc = app.get(fixUrl(data)).document
-        
         val realUrl = doc.selectFirst(".open-fake-url")?.attr("data-url")
             ?: doc.selectFirst("iframe[src*='mostraguarda']")?.attr("src")
             
@@ -128,17 +145,10 @@ class CineblogProvider : MainAPI() {
             doc = app.get(fixUrl(realUrl)).document
         }
 
-        doc.select("li[data-link], a[data-link]").forEach { el ->
-            val link = el.attr("data-link")
-            if (link.isNotBlank() && !link.contains("mostraguarda.stream")) {
+        doc.select("li[data-link], a[data-link], iframe#_player, iframe[src*='embed']").forEach { el ->
+            val link = el.attr("data-link").ifEmpty { el.attr("src") }
+            if (link.isNotBlank() && !link.contains("mostraguarda.stream") && !link.contains("facebook") && !link.contains("google")) {
                 loadExtractor(fixUrl(link), data, subtitleCallback, callback)
-            }
-        }
-
-        doc.select("iframe#_player, iframe[src*='embed']").forEach { iframe ->
-            val src = iframe.attr("src")
-            if (src.isNotBlank() && !src.contains("facebook") && !src.contains("google")) {
-                loadExtractor(fixUrl(src), data, subtitleCallback, callback)
             }
         }
 
