@@ -4,7 +4,6 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
 import org.jsoup.nodes.Element
-import java.util.ArrayList
 
 class CineblogProvider : MainAPI() {
     override var mainUrl = "https://cineblog001.club"
@@ -22,34 +21,24 @@ class CineblogProvider : MainAPI() {
         return newHomePageResponse(listOf(HomePageList("In Evidenza", items)), false)
     }
 
-    // Versione semplificata della ricerca per evitare errori di compilazione 'kotlinx'
     override suspend fun search(query: String): List<SearchResponse> {
-        val results = mutableListOf<SearchResponse>()
+        // Usiamo POST per simulare la ricerca reale del sito
+        // search_start 1 carica i primi 20 risultati
+        val response = app.post(
+            "$mainUrl/index.php?do=search",
+            data = mapOf(
+                "do" to "search",
+                "subaction" to "search",
+                "search_start" to "1",
+                "full_search" to "0",
+                "result_from" to "1",
+                "story" to query
+            )
+        ).document
         
-        // Carichiamo le prime 2 pagine in sequenza (più sicuro se le coroutine danno errore)
-        for (page in 1..2) {
-            try {
-                val response = app.post(
-                    "$mainUrl/index.php?do=search",
-                    data = mapOf(
-                        "do" to "search",
-                        "subaction" to "search",
-                        "search_start" to "$page",
-                        "full_search" to "0",
-                        "result_from" to "${(page - 1) * 20 + 1}",
-                        "story" to query
-                    )
-                ).document
-                
-                val pageItems = response.select(".m-item, .movie-item, article").mapNotNull {
-                    it.toSearchResult()
-                }
-                results.addAll(pageItems)
-            } catch (e: Exception) {
-                // Se una pagina fallisce, continua con i risultati ottenuti finora
-            }
-        }
-        return results.distinctBy { it.url }
+        return response.select(".m-item, .movie-item, article").mapNotNull {
+            it.toSearchResult()
+        }.distinctBy { it.url }
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
