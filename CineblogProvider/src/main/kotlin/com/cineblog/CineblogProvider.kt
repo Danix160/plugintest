@@ -57,7 +57,11 @@ class CineblogProvider : MainAPI() {
 
         val img = this.selectFirst("img")
         val posterUrl = fixUrlNull(img?.attr("data-src") ?: img?.attr("src"))
-        val isTv = href.contains("/serie-tv/") || title.contains("serie tv", true)
+        
+        // Determina se è una serie TV dal titolo o dall'URL
+        val isTv = href.contains("/serie-tv/") || 
+                   title.contains("serie tv", true) || 
+                   title.contains("stagion", true)
 
         return if (isTv) {
             newTvSeriesSearchResponse(title, href, TvType.TvSeries) { this.posterUrl = posterUrl }
@@ -75,45 +79,62 @@ class CineblogProvider : MainAPI() {
         )
         val plot = doc.selectFirst("meta[name='description']")?.attr("content")
         
-        val isSerie = url.contains("/serie-tv/") || doc.select(".tv_tabs_container").isNotEmpty()
-
-        return if (isSerie) {
+        // Controllo se ci sono elementi tipici delle serie TV (classi tt_series o tt_season)
+        val isSerieContainer = doc.select(".tt_series, .tt_season, .tab-content, #tv_tabs").isNotEmpty()
+        val isSerieUrl = url.contains("/serie-tv/")
+        
+        return if (isSerieUrl || isSerieContainer) {
             val episodesList = mutableListOf<Episode>()
             
-            // FILTRO CRUCIALE: Cerchiamo i tab SOLO dentro il contenitore principale della serie
-            // Ignoriamo i widget "correlati" o "raccomandati" che stanno fuori da questo ID
-            val mainContainer = doc.selectFirst("#tv_tabs, .tv_tabs_container, .video-player-tabs")
+            // 1. Cerchiamo i tab delle stagioni (div con classe tab-pane)
+            val seasonTabs = doc.select(".tab-content .tab-pane")
             
-            val seasonTabs = mainContainer?.select(".tab-pane") ?: doc.select(".tv_tabs_container .tab-pane")
-            
-            // Verifichiamo che i tab appartengano effettivamente alla serie (devono contenere link con numeri episodio)
-            val validSeasons = seasonTabs.filter { it.select("li a").isNotEmpty() }
+            // 2. Filtriamo per assicurarci di prendere solo i tab degli episodi (devono avere un ID con "season")
+            val validSeasonTabs = seasonTabs.filter { it.id().contains("season") || it.select("li a").isNotEmpty() }
 
-            validSeasons.forEachIndexed { index, seasonElement ->
-                val seasonNum = index + 1
-                
-                seasonElement.select("ul li").forEach { li ->
-                    val a = li.selectFirst("a")
-                    val text = li.text()
-                    if (a != null) {
+            if (validSeasonTabs.isNotEmpty()) {
+                validSeasonTabs.forEachIndexed { index, seasonElement ->
+                    val seasonNum = index + 1
+                    
+                    // Cerchiamo ogni link di episodio all'interno del tab della stagione
+                    seasonElement.select("li").forEach { li ->
+                        val a = li.selectFirst("a") ?: return@forEach
                         val epData = a.attr("data-link").ifEmpty { a.attr("href") }
                         
-                        // Estraiamo il numero episodio (es: "1.5" -> 5)
-                        val epNum = Regex("""\d+\.(\d+)""").find(text)?.groupValues?.get(1)?.toIntOrNull()
-                                    ?: Regex("""(\d+)""").find(text)?.groupValues?.get(1)?.toIntOrNull() 
-                                    ?: 1
-                        
+                        // Estraiamo il numero episodio (es: data-num="1x5" o testo "1.5")
+                        val dataNum = a.attr("data-num")
+                        val epNum = if (dataNum.contains("x")) {
+                            dataNum.substringAfter("x").toIntOrNull()
+                        } else {
+                            Regex("""\d+\.(\d+)""").find(li.text())?.groupValues?.get(1)?.toIntOrNull()
+                        } ?: 1
+
                         episodesList.add(newEpisode(fixUrl(epData)) {
                             this.name = "Episodio $epNum"
                             this.season = seasonNum
                             this.episode = epNum
-                            this.posterUrl = poster 
+                            this.posterUrl = poster // Attiva la griglia con miniature
                         })
                     }
                 }
+            } else {
+                // Caso fallback: lista piatta senza tab
+                doc.select(".tt_series li, .episodes-list li").forEachIndexed { index, li ->
+                    val a = li.selectFirst("a") ?: return@forEachIndexed
+                    val epData = a.attr("data-link").ifEmpty { a.attr("href") }
+                    episodesList.add(newEpisode(fixUrl(epData)) {
+                        this.name = a.text().trim()
+                        this.season = 1
+                        this.episode = index + 1
+                        this.posterUrl = poster
+                    })
+                }
             }
 
-            newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodesList.distinctBy { "${it.season}-${it.episode}" }) {
+            // Rimuoviamo duplicati e ordiniamo
+            val finalEpisodes = episodesList.distinctBy { "${it.season}-${it.episode}" }
+
+            newTvSeriesLoadResponse(title, url, TvType.TvSeries, finalEpisodes) {
                 this.posterUrl = poster
                 this.plot = plot
             }
@@ -133,6 +154,7 @@ class CineblogProvider : MainAPI() {
     ): Boolean {
         if (data.startsWith("http") && !data.contains("cineblog001") && !data.contains("mostraguarda")) {
             loadExtractor(data, data, subtitleCallback, callback)
+            return true
         }
 
         var doc = app.get(fixUrl(data)).document
@@ -143,7 +165,8 @@ class CineblogProvider : MainAPI() {
             doc = app.get(fixUrl(realUrl)).document
         }
 
-        doc.select("li[data-link], a[data-link], iframe#_player, iframe[src*='embed']").forEach { el ->
+        // Estrae tutti i link possibili dai mirror (Mixdrop, Supervideo, ecc)
+        doc.select("li[data-link], a[data-link], a.mr, iframe#_player, iframe[src*='embed']").forEach { el ->
             val link = el.attr("data-link").ifEmpty { el.attr("src") }
             if (link.isNotBlank() && !link.contains("mostraguarda.stream") && !link.contains("facebook") && !link.contains("google")) {
                 loadExtractor(fixUrl(link), data, subtitleCallback, callback)
