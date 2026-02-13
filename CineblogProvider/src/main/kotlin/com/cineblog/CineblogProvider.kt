@@ -22,24 +22,34 @@ class CineblogProvider : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        // Usiamo POST per simulare la ricerca reale del sito
-        // search_start 1 carica i primi 20 risultati
-        val response = app.post(
-            "$mainUrl/index.php?do=search",
-            data = mapOf(
-                "do" to "search",
-                "subaction" to "search",
-                "search_start" to "1",
-                "full_search" to "0",
-                "result_from" to "1",
-                "story" to query
-            )
-        ).document
-        
-        return response.select(".m-item, .movie-item, article").mapNotNull {
-            it.toSearchResult()
-        }.distinctBy { it.url }
+    val allResults = mutableListOf<SearchResponse>()
+    
+    // Ciclo per caricare le prime 3 pagine del sito cineblog
+    for (page in 1..3) {
+        try {
+            val pagedResults = app.post(
+                "$mainUrl/index.php?do=search",
+                data = mapOf(
+                    "do" to "search",
+                    "subaction" to "search",
+                    "search_start" to "$page",
+                    "full_search" to "0",
+                    "result_from" to "${(page - 1) * 20 + 1}",
+                    "story" to query
+                )
+            ).document.select(".m-item, .movie-item, article").mapNotNull {
+                it.toSearchResult()
+            }
+            
+            if (pagedResults.isEmpty()) break // Se una pagina è vuota, si ferma
+            allResults.addAll(pagedResults)
+        } catch (e: Exception) {
+            break
+        }
     }
+    
+    return allResults.distinctBy { it.url }
+}
 
     private fun Element.toSearchResult(): SearchResponse? {
         val a = this.selectFirst("a") ?: return null
