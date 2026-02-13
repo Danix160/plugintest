@@ -74,35 +74,45 @@ class CineblogProvider : MainAPI() {
             ?: doc.selectFirst(".story-poster img, .m-img img, img[itemprop='image']")?.attr("src")
         )
         val plot = doc.selectFirst("meta[name='description']")?.attr("content")
-        val isSerie = url.contains("/serie-tv/") || doc.select(".tab-content .tab-pane, #tv_tabs").isNotEmpty()
+        
+        // Controllo se è una serie TV basandoci su URL o presenza di tab stagioni
+        val isSerie = url.contains("/serie-tv/") || doc.select(".tab-content, #tv_tabs, .tv_tabs_container").isNotEmpty()
 
         return if (isSerie) {
             val episodesList = mutableListOf<Episode>()
-            val seasonTabs = doc.select(".tab-content .tab-pane")
+            
+            // Selezioniamo i tab-pane all'interno dei contenitori specifici delle serie
+            val seasonTabs = doc.select(".tv_tabs_container .tab-pane, .tab-content .tab-pane, #tv_tabs .tab-pane")
+            
+            // Filtriamo solo i tab che contengono effettivamente dei link (escludendo commenti o altro)
+            val validSeasons = seasonTabs.filter { it.select("li a").isNotEmpty() }
 
-            if (seasonTabs.isNotEmpty()) {
-                seasonTabs.forEachIndexed { index, seasonElement ->
-                    val seasonNum = index + 1
-                    seasonElement.select("ul li").forEach { li ->
-                        val a = li.selectFirst("a")
-                        val text = li.text()
-                        if (a != null) {
-                            val epData = a.attr("data-link").ifEmpty { a.attr("href") }
-                            // Estrae il numero dopo il punto (es: "1.5" -> 5)
-                            val epNum = Regex("""\d+\.(\d+)""").find(text)?.groupValues?.get(1)?.toIntOrNull()
-                                        ?: Regex("""(\d+)""").find(text)?.groupValues?.get(1)?.toIntOrNull() ?: 1
-                            
-                            episodesList.add(newEpisode(fixUrl(epData)) {
-                                this.name = "Episodio $epNum"
-                                this.season = seasonNum
-                                this.episode = epNum
-                                this.posterUrl = poster // Attiva la miniatura nel layout
-                            })
-                        }
+            validSeasons.forEachIndexed { index, seasonElement ->
+                val seasonNum = index + 1
+                
+                seasonElement.select("ul li").forEach { li ->
+                    val a = li.selectFirst("a")
+                    val text = li.text()
+                    if (a != null) {
+                        val epData = a.attr("data-link").ifEmpty { a.attr("href") }
+                        
+                        // Estraiamo il numero episodio (es: "1.5" -> 5)
+                        val epNum = Regex("""\d+\.(\d+)""").find(text)?.groupValues?.get(1)?.toIntOrNull()
+                                    ?: Regex("""(\d+)""").find(text)?.groupValues?.get(1)?.toIntOrNull() 
+                                    ?: 1
+                        
+                        episodesList.add(newEpisode(fixUrl(epData)) {
+                            this.name = "Episodio $epNum"
+                            this.season = seasonNum
+                            this.episode = epNum
+                            this.posterUrl = poster // Poster su ogni episodio per visualizzazione a griglia
+                        })
                     }
                 }
-            } else {
-                // Fallback per liste semplici
+            }
+
+            // Fallback se la struttura a tab non viene trovata
+            if (episodesList.isEmpty()) {
                 doc.select(".episodes-list li, .tt_series li").forEachIndexed { index, li ->
                     val a = li.selectFirst("a") ?: return@forEachIndexed
                     val epData = a.attr("data-link").ifEmpty { a.attr("href") }
