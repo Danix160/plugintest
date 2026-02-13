@@ -24,10 +24,10 @@ class CineblogProvider : MainAPI() {
     override suspend fun search(query: String): List<SearchResponse> {
     val allResults = mutableListOf<SearchResponse>()
     
-    // Ciclo per caricare le prime 3 pagine del sito cineblog
-    for (page in 1..3) {
+    // Aumentato l'intervallo fino a 10 pagine
+    for (page in 1..10) {
         try {
-            val pagedResults = app.post(
+            val response = app.post(
                 "$mainUrl/index.php?do=search",
                 data = mapOf(
                     "do" to "search",
@@ -36,21 +36,31 @@ class CineblogProvider : MainAPI() {
                     "full_search" to "0",
                     "result_from" to "${(page - 1) * 20 + 1}",
                     "story" to query
-                )
-            ).document.select(".m-item, .movie-item, article").mapNotNull {
+                ),
+                timeout = 15000 // Opzionale: aumenta il timeout se carichi molte pagine
+            ).document
+            
+            val pagedResults = response.select(".m-item, .movie-item, article").mapNotNull {
                 it.toSearchResult()
             }
             
-            if (pagedResults.isEmpty()) break // Se una pagina è vuota, si ferma
+            // Se la pagina corrente non ha risultati, è inutile continuare con le successive
+            if (pagedResults.isEmpty()) break 
+            
             allResults.addAll(pagedResults)
+            
+            // Protezione: se abbiamo caricato meno di 20 film, probabilmente non c'è una pagina successiva
+            if (pagedResults.size < 20) break
+
         } catch (e: Exception) {
+            // Se c'è un errore di connessione su una pagina, restituiamo quello che abbiamo trovato finora
             break
         }
     }
     
+    // Rimuove eventuali duplicati (capita spesso nei motori DLE)
     return allResults.distinctBy { it.url }
 }
-
     private fun Element.toSearchResult(): SearchResponse? {
         val a = this.selectFirst("a") ?: return null
         val href = fixUrl(a.attr("href"))
