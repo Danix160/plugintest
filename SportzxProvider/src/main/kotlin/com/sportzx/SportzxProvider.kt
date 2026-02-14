@@ -19,14 +19,10 @@ class SportzxProvider : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
-        Log.d("SportzX", "Inizio recupero dati...")
-        
-        // Proviamo la pagina live specifica
         val res = app.get("$mainUrl/sportzx-live/", headers = commonHeaders)
         val doc = res.document
         val items = mutableListOf<SearchResponse>()
 
-        // Tentativo 1: Selettore standard vsc-card
         val cards = doc.select("div.vsc-card")
         
         if (cards.isNotEmpty()) {
@@ -45,7 +41,6 @@ class SportzxProvider : MainAPI() {
                 ).apply { this.posterUrl = imageUrl })
             }
         } else {
-            // Fallback: Se la pagina è "vuota" per il bot, cerchiamo tutti i link che sembrano match
             doc.select("a").forEach { 
                 val text = it.text().lowercase()
                 if (text.contains("vs") || text.contains("live") || text.contains("stream")) {
@@ -71,8 +66,6 @@ class SportzxProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val doc = app.get(data, headers = commonHeaders).document
-        
-        // Estraiamo link dai pulsanti server o iframe
         val links = mutableListOf<String>()
         doc.select("a.vsc-stream-link").forEach { links.add(it.attr("href")) }
         doc.select("iframe").forEach { links.add(it.attr("src")) }
@@ -81,24 +74,21 @@ class SportzxProvider : MainAPI() {
             val finalUrl = if (link.startsWith("/")) mainUrl + link else link
             try {
                 val text = app.get(finalUrl, referer = data, headers = commonHeaders).text
-                // Regex per trovare il file m3u8 nel codice sorgente del player
                 val m3u8 = Regex("""["'](https?.*?\.m3u8.*?)["']""").find(text)?.groupValues?.get(1)
                 
                 if (m3u8 != null) {
                     callback(
                         ExtractorLink(
-                            source = this.name,
-                            name = "Server " + finalUrl.substringAfter("://").substringBefore("/"),
-                            url = m3u8,
-                            referer = finalUrl,
-                            quality = Qualities.P1080.value,
-                            type = ExtractorLinkType.M3U8
+                            this.name,
+                            "Server HD",
+                            m3u8,
+                            finalUrl,
+                            Qualities.P1080.value,
+                            true
                         )
                     )
                 }
-            } catch (e: Exception) {
-                Log.e("SportzX", "Errore link: ${e.message}")
-            }
+            } catch (e: Exception) { }
         }
         return true
     }
