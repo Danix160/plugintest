@@ -91,20 +91,16 @@ class ToonItaliaProvider : MainAPI() {
         val entryContent = document.selectFirst("div.entry-content")
         val fullText = entryContent?.text() ?: ""
 
-        // --- SOLUZIONE TRAMA ---
-        // Cerchiamo l'intestazione che contiene la parola "Trama:"
+        // --- SOLUZIONE TRAMA CON TAGLIO FONTE ---
         val tramaElement = document.selectFirst("h3:contains(Trama:), p:contains(Trama:), b:contains(Trama:)")
-        val plot = if (tramaElement != null) {
-            // Se esiste, prendiamo il testo del nodo successivo (la trama vera e propria)
+        var plot = if (tramaElement != null) {
             val nextText = tramaElement.nextSibling()?.toString()?.replace(Regex("<[^>]*>"), "")?.trim()
             if (!nextText.isNullOrBlank()) {
                 nextText
             } else {
-                // Se il testo non è nel nodo successivo, proviamo a estrarlo dal genitore dopo la parola "Trama:"
                 tramaElement.parent()?.text()?.substringAfter("Trama:")?.trim()
             }
         } else {
-            // Fallback: cerca un paragrafo lungo che non contenga i metadati tecnici
             document.select("div.entry-content p")
                 .map { it.text() }
                 .firstOrNull { 
@@ -112,6 +108,10 @@ class ToonItaliaProvider : MainAPI() {
                     !it.contains(Regex("(?i)Titolo originale|Paese di origine|Stato Opera|Aggiornamento")) 
                 }
         }
+
+        // Taglia la trama se contiene "Fonte:" o "Animeclick"
+        plot = plot?.split(Regex("(?i)Fonte:"), 2)?.first()?.trim()
+        plot = plot?.split(Regex("(?i)Animeclick"), 2)?.first()?.trim()
 
         val duration = Regex("""(\d+)\s?min""").find(fullText)?.groupValues?.get(1)?.toIntOrNull()
         val year = Regex("""\b(19\d{2}|20[0-2]\d)\b""").find(fullText)?.groupValues?.get(1)?.toIntOrNull()
@@ -167,7 +167,7 @@ class ToonItaliaProvider : MainAPI() {
         return if (tvType == TvType.Movie) {
             newMovieLoadResponse(title, url, TvType.Movie, finalEpisodes.firstOrNull()?.data ?: "") {
                 this.posterUrl = poster
-                this.plot = plot?.trim()
+                this.plot = plot
                 this.year = year
                 this.duration = duration
                 this.posterHeaders = commonHeaders
@@ -175,7 +175,7 @@ class ToonItaliaProvider : MainAPI() {
         } else {
             newTvSeriesLoadResponse(title, url, tvType, finalEpisodes) {
                 this.posterUrl = poster
-                this.plot = plot?.trim()
+                this.plot = plot
                 this.year = year
                 this.duration = duration
                 this.posterHeaders = commonHeaders
