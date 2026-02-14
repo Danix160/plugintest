@@ -43,7 +43,7 @@
         "iconUrl": "https://sportzx.cc/wp-content/uploads/2025/10/sportzx.webp",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/Danix160/plugintest",
-        "fileSize": 8580,
+        "fileSize": 9492,
         "status": 1,
         "language": "it",
         "authors": [
@@ -52,9 +52,9 @@
         "tvTypes": [
             "Live"
         ],
-        "version": 17,
+        "version": 18,
         "internalName": "SportzxProvider",
-        "description": "cb01uno.one",
+        "description": "Sportzx Live Sports",
         "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/SportzxProvider.cs3",
         "name": "SportzxProvider"
     },
