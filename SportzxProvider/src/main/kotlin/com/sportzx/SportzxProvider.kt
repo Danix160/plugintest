@@ -16,7 +16,6 @@ class SportzxProvider : MainAPI() {
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
     )
 
-    // Firma corretta per getMainPage
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
         val doc = app.get("$mainUrl/sportzx-live/", headers = headers).document
         val items = mutableListOf<SearchResponse>()
@@ -38,12 +37,12 @@ class SportzxProvider : MainAPI() {
         val doc = app.get(url, headers = headers).document
         val title = doc.selectFirst("title")?.text()?.replace(" - SportzX TV", "") ?: "Live Stream"
 
-        // Corretto ordine parametri: name, url, type, dataUrl
+        // Correzione Type Mismatch: l'ordine dei parametri per newLiveStreamLoadResponse è fondamentale
         return newLiveStreamLoadResponse(
-            title,
-            url,
-            TvType.Live,
-            url
+            name = title,
+            url = url,
+            type = TvType.Live,
+            dataUrl = url
         )
     }
 
@@ -60,20 +59,19 @@ class SportzxProvider : MainAPI() {
             if (src.contains("topstream") || src.contains("clonemy") || src.contains("stream")) {
                 val iframeRes = app.get(src, referer = data, headers = headers).text
                 
-                // Regex più robusta per catturare l'URL m3u8
                 val m3u8Regex = Regex("""(?:file|source|src)\s*:\s*["'](https?.*?\.m3u8.*?)["']""")
                 val foundUrl = m3u8Regex.find(iframeRes)?.groupValues?.get(1)
 
                 if (foundUrl != null) {
-                    // newExtractorLink senza parametri nominati per evitare errori di firma
+                    // Uso di newExtractorLink con parametri nominati per la massima sicurezza
                     callback.invoke(
-                        ExtractorLink(
-                            "SportzX", // source
-                            "HD Stream", // name
-                            foundUrl, // url
-                            src, // referer
-                            Qualities.P1080.value, // quality
-                            true // isM3u8
+                        newExtractorLink(
+                            source = "SportzX",
+                            name = "HD Stream",
+                            url = foundUrl,
+                            referer = src,
+                            quality = Qualities.P1080.value,
+                            isM3u8 = true
                         )
                     )
                 }
