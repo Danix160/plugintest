@@ -40,75 +40,59 @@ class CbProvider : MainAPI() {
         }
     }
 
+    // Funzione helper per il parsing degli elementi (riutilizzata da search e mainPage)
+    private fun parseElement(element: org.jsoup.nodes.Element, isTvSeriesSearch: Boolean = false): SearchResponse? {
+        val titleElement = element.selectFirst("h2 a, h3 a, .card-title a, .post-title a, a[title]") ?: return null
+        val href = titleElement.attr("href")
+        if (href.contains("/tag/") || href.contains("/category/") || href.length < 15) return null
+        
+        val rawTitle = titleElement.text()
+        val isSeries = isTvSeriesSearch || href.contains("/serietv/") || href.contains("/serie/") || 
+                       rawTitle.contains(Regex("(?i)Stagion|Serie|Episodio"))
+
+        val title = fixTitle(rawTitle, !isSeries)
+        val posterUrl = element.selectFirst("img")?.let { img ->
+            img.attr("data-lazy-src").ifBlank { 
+                img.attr("data-src").ifBlank { img.attr("src") } 
+            }
+        }
+
+        return newMovieSearchResponse(title, href, if (isSeries) TvType.TvSeries else TvType.Movie) {
+            this.posterUrl = posterUrl
+        }
+    }
+
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = if (page <= 1) request.data else "${request.data.removeSuffix("/")}/page/$page/"
         val document = app.get(url, headers = commonHeaders).document
-        
-        val items = document.select("div.card.mp-post, div.post-video, article.post, div.mp-post").mapNotNull { element ->
-            val titleElement = element.selectFirst(".card-title a, h3 a, h2 a, .post-title a") ?: return@mapNotNull null
-            val href = titleElement.attr("href")
-            if (href.contains("/tag/") || href.contains("/category/") || href.length < 10) return@mapNotNull null
-
-            val isSeries = href.contains("/serietv/") || href.contains("/serie/") || request.data.contains("serietv")
-            val title = fixTitle(titleElement.text(), !isSeries)
-            
-            val posterUrl = element.selectFirst(".card-image img, img")?.let { img ->
-                img.attr("data-lazy-src").ifBlank { 
-                    img.attr("data-src").ifBlank { img.attr("src") } 
-                }
-            }
-
-            newMovieSearchResponse(title, href, if (isSeries) TvType.TvSeries else TvType.Movie) {
-                this.posterUrl = posterUrl
-            }
+        val items = document.select("div.card, div.post-video, article.post, div.mp-post").mapNotNull { 
+            parseElement(it, request.data.contains("serietv")) 
         }.distinctBy { it.url }
-
         return newHomePageResponse(request.name, items)
     }
 
-    // --- RICERCA UNIFICATA (FILM + SERIE TV) ---
+    // --- LOGICA DI RICERCA DOPPIA (PARALLELA) ---
     override suspend fun search(query: String): List<SearchResponse> {
         val allResults = mutableListOf<SearchResponse>()
-        val maxPages = 5 
+        
+        // Eseguiamo due ricerche: una globale e una specifica per le serie TV
+        val searchUrls = listOf(
+            "$mainUrl/?s=$query",          // Ricerca globale
+            "$mainUrl/serietv/?s=$query"   // Ricerca specifica Serie TV
+        )
 
-        for (page in 1..maxPages) {
-            // Usiamo l'URL di ricerca globale per trovare tutto
-            val url = if (page == 1) "$mainUrl/?s=$query" else "$mainUrl/page/$page/?s=$query"
-            val response = try { app.get(url, headers = commonHeaders) } catch (e: Exception) { null }
-            val document = response?.document ?: break
-            
-            // Selettore per ogni tipo di risultato (card, articoli, liste)
-            val items = document.select("div.card, div.post-video, article, div.mp-post, div.post, li.item-list")
-            if (items.isEmpty()) break
-
-            items.forEach { element ->
-                val titleElement = element.selectFirst("h2 a, h3 a, .card-title a, .post-title a, a[title]") ?: return@forEach
-                val href = titleElement.attr("href")
+        searchUrls.forEach { baseUrl ->
+            for (page in 1..2) { // 2 pagine per ogni sorgente (totale 4 pagine di risultati)
+                val url = if (page == 1) baseUrl else "${baseUrl.replace("?s=", "page/$page/?s=")}"
+                val response = try { app.get(url, headers = commonHeaders) } catch (e: Exception) { null }
+                val document = response?.document ?: break
                 
-                // Salta i link non validi
-                if (href.contains("/tag/") || href.contains("/category/") || href.length < 15) return@forEach
-                
-                val rawTitle = titleElement.text()
+                val items = document.select("div.card, div.post-video, article, div.mp-post, div.post, li.item-list")
+                if (items.isEmpty()) break
 
-                // LOGICA DI UNIFICAZIONE:
-                // Se l'URL contiene "serietv" o "serie", Cloudstream lo tratterà come Serie TV
-                // Altrimenti come Film. Questo permette di averli mischiati nella ricerca.
-                val isSeries = href.contains("/serietv/") || 
-                               href.contains("/serie/") ||
-                               element.text().contains("Serie TV", ignoreCase = true) ||
-                               rawTitle.contains(Regex("(?i)Stagion|Episodio|Serie"))
-
-                val title = fixTitle(rawTitle, !isSeries)
-                
-                val posterUrl = element.selectFirst("img")?.let { img ->
-                    img.attr("data-lazy-src").ifBlank { 
-                        img.attr("data-src").ifBlank { img.attr("src") } 
-                    }
+                items.forEach { element ->
+                    parseElement(element, baseUrl.contains("serietv"))?.let { allResults.add(it) }
                 }
-
-                allResults.add(newMovieSearchResponse(title, href, if (isSeries) TvType.TvSeries else TvType.Movie) {
-                    this.posterUrl = posterUrl
-                })
             }
         }
         return allResults.distinctBy { it.url }
@@ -116,8 +100,7 @@ class CbProvider : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse {
         val document = app.get(url, headers = commonHeaders).document
-        // Molto importante: riconosciamo se è una serie anche in fase di caricamento
-        val isSeries = url.contains("/serietv/") || url.contains("/serie/") || document.select(".category").text().contains("Serie TV", true)
+        val isSeries = url.contains("/serietv/") || url.contains("/serie/")
         
         val title = fixTitle(document.selectFirst("h1")?.text() ?: "", !isSeries)
         val poster = document.selectFirst("meta[property=\"og:image\"]")?.attr("content")
@@ -139,13 +122,12 @@ class CbProvider : MainAPI() {
                     linkList.add(link)
                 }
             }
-
             val finalLinks = linkList.filter { !it.contains("youtube") }
             if (finalLinks.isNotEmpty()) {
                 episodes.add(newEpisode(finalLinks.joinToString("###")) { this.name = "Film - Streaming" })
             }
         } else {
-            // Parsing Episodi e Stagioni
+            // Parsing Episodi (Serie TV)
             document.select("div.sp-wrap, .entry-content table, .serie-tv-table").forEachIndexed { index, wrap ->
                 val seasonNum = index + 1
                 wrap.select(".sp-body p, .sp-body li, tr").forEach { row ->
@@ -193,14 +175,12 @@ class CbProvider : MainAPI() {
             } 
             else {
                 var finalUrl: String? = rawLink
-
                 if (rawLink.contains("stayonline.pro")) {
                     finalUrl = bypassStayOnline(rawLink)
                 } 
                 else if (rawLink.contains("uprot.net") || rawLink.contains("swzz.xyz") || rawLink.contains("maxsa")) {
                     finalUrl = bypassShortener(rawLink)
                 }
-
                 finalUrl?.let { l ->
                     if (l.startsWith("http") && !l.contains("uprot.net") && !l.contains("swzz.xyz") && !l.contains("maxsa")) {
                         loadExtractor(l, subtitleCallback, callback)
@@ -229,20 +209,16 @@ class CbProvider : MainAPI() {
             if (req.url != link && supportedHosts.any { req.url.contains(it) && !req.url.contains("uprot") }) {
                 return req.url
             }
-
             val doc = req.document
             val scriptLinks = doc.select("script").map { it.data() }
                 .flatMap { Regex("""https?://[^\s"']+""").findAll(it).map { m -> m.value }.toList() }
-            
             val found = scriptLinks.firstOrNull { s -> 
                 supportedHosts.any { s.contains(it) } && !s.contains("uprot") && !s.contains("swzz")
             }
-
             found ?: doc.select("a.btn, .download-link, #download a").firstOrNull { a ->
                 val href = a.attr("href")
                 supportedHosts.any { href.contains(it) }
             }?.attr("href") ?: req.url
-            
         } catch (e: Exception) { null }
     }
 }
