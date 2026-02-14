@@ -1,9 +1,9 @@
 package com.sportzx
 
+import android.util.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
-import android.util.Log
 
 class SportzxProvider : MainAPI() {
     override var mainUrl = "https://sportzx.cc"
@@ -18,26 +18,42 @@ class SportzxProvider : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
+        // Usiamo l'endpoint specifico per gli eventi live visto nei tuoi file
         val doc = app.get("$mainUrl/sportzx-live/", headers = headers).document
         val items = mutableListOf<SearchResponse>()
 
-        // Seleziona i titoli degli eventi live
-        doc.select("div.elementor-widget-container h3").forEach { 
+        // Selettore aggiornato basato sull'HTML reale del sito (elementor-heading-title)
+        doc.select("h3.elementor-heading-title a, .elementor-widget-container h3 a").forEach { 
             val title = it.text().trim()
-            if (title.isNotEmpty()) {
+            val href = it.attr("href")
+            if (title.isNotEmpty() && href.isNotEmpty()) {
                 items.add(newLiveSearchResponse(
                     title,
-                    "$mainUrl/en-vivo/",
+                    href,
                     TvType.Live
                 ))
             }
         }
-        return newHomePageResponse(listOf(HomePageList("Eventi Live", items)), false)
+        
+        // Se la lista è vuota, proviamo un selettore più generico per i titoli
+        if (items.isEmpty()) {
+            doc.select("h3").forEach {
+                val title = it.text().trim()
+                if (title.contains("vs", ignoreCase = true) || title.contains("Live", ignoreCase = true)) {
+                    items.add(newLiveSearchResponse(title, "$mainUrl/en-vivo/", TvType.Live))
+                }
+            }
+        }
+
+        return newHomePageResponse(listOf(HomePageList("Eventi Sportivi", items)), false)
     }
 
     override suspend fun load(url: String): LoadResponse {
         val doc = app.get(url, headers = headers).document
-        val title = doc.selectFirst("title")?.text()?.replace(" - SportzX TV", "") ?: "Live Stream"
+        // Estraiamo il titolo dalla pagina o dal tag og:title
+        val title = doc.selectFirst("meta[property=og:title]")?.attr("content") 
+                    ?: doc.selectFirst("title")?.text()?.replace(" - SportzX TV", "") 
+                    ?: "Live Stream"
 
         return newLiveStreamLoadResponse(title, url, url) {
             this.apiName = this@SportzxProvider.name
@@ -53,24 +69,25 @@ class SportzxProvider : MainAPI() {
     ): Boolean {
         val doc = app.get(data, headers = headers).document
         
-        // Cerca gli iframe che contengono i player video
-        doc.select("iframe").forEach { iframe ->
-            val src = iframe.attr("src")
-            // Filtra solo gli iframe dei server conosciuti
-            if (src.contains("topstream") || src.contains("clonemy") || src.contains("stream")) {
+        // Analizziamo sia gli iframe diretti che i link nel modal (vsc-stream-link)
+        val sources = doc.select("iframe").map { it.attr("src") }.toMutableList()
+        doc.select("a.vsc-stream-link").forEach { sources.add(it.attr("href")) }
+
+        sources.distinct().forEach { src ->
+            if (src.contains("topstream") || src.contains("clonemy") || src.contains("stream") || src.contains("m3u8")) {
                 try {
-                    val iframeRes = app.get(src, referer = data, headers = headers).text
+                    val res = app.get(src, referer = data, headers = headers)
+                    val iframeRes = res.text
                     
-                    // Regex per estrarre il link .m3u8 dal codice sorgente dell'iframe
-                    val m3u8Regex = Regex("""(?:file|source|src)\s*:\s*["'](https?.*?\.m3u8.*?)["']""")
+                    // Cerchiamo il file .m3u8 nel sorgente
+                    val m3u8Regex = Regex("""(?:file|source|src|url)\s*[:=]\s*["'](https?.*?\.m3u8.*?)["']""")
                     val foundUrl = m3u8Regex.find(iframeRes)?.groupValues?.get(1)
 
                     if (foundUrl != null) {
-                        // Utilizzo della sintassi confermata dall'esempio funzionante
                         callback(
                             newExtractorLink(
                                 source = this.name,
-                                name = "HD",
+                                name = "Server " + (src.substringAfter("://").substringBefore(".")),
                                 url = foundUrl,
                                 type = ExtractorLinkType.M3U8
                             ) {
@@ -80,7 +97,7 @@ class SportzxProvider : MainAPI() {
                         )
                     }
                 } catch (e: Exception) {
-                    Log.e("SportzX", "Errore nel caricamento del link: ${e.message}")
+                    Log.e("SportzX", "Errore link $src: ${e.message}")
                 }
             }
         }
