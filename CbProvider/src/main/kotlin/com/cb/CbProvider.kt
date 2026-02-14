@@ -5,7 +5,7 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.MainAPI
 import com.lagradost.cloudstream3.TvType
-import org.jsoup.Jsoup
+import org.jsoup.nodes.Element
 import org.json.JSONObject
 
 class CbProvider : MainAPI() {
@@ -16,8 +16,8 @@ class CbProvider : MainAPI() {
     override val hasMainPage = true
 
     private val commonHeaders = mapOf(
-        "Referer" to "$mainUrl/",
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Referer" to "$mainUrl/"
     )
 
     private val supportedHosts = listOf(
@@ -38,39 +38,39 @@ class CbProvider : MainAPI() {
         }
     }
 
+    private fun getPoster(element: Element): String? {
+        val img = element.selectFirst("img") ?: return null
+        return img.attr("data-lazy-src").ifBlank { 
+            img.attr("data-src").ifBlank { 
+                img.attr("src") 
+            } 
+        }
+    }
+
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = if (page <= 1) request.data else "${request.data.removeSuffix("/")}/page/$page/"
+        Log.d("CB01", "Richiesta URL: $url")
         
-        // Debug Log
-        Log.d("CB01", "Chiamata URL: $url")
+        val document = app.get(url, headers = commonHeaders).document
         
-        val response = app.get(url, headers = commonHeaders)
-        val document = response.document
-        
-        // Selettore espanso: cerca sia div.post-video che article.post
-        val items = document.select("div.post-video, article.post, .box-film").mapNotNull { element ->
+        // Selettore specifico per la struttura div > video-inner > h2
+        val items = document.select("div.post-video, div.video-inner, article.post").mapNotNull { element ->
             val titleElement = element.selectFirst("h2 a, h3 a, .title a") ?: return@mapNotNull null
             val href = titleElement.attr("href")
             
-            // Logica per determinare se è una serie TV dall'URL o dal titolo
+            // Ignora link di sistema
+            if (href.contains("/tag/") || href.contains("/category/") || href.length < 5) return@mapNotNull null
+
             val isSeries = href.contains("/serietv/") || request.data.contains("serietv")
             val title = fixTitle(titleElement.text(), !isSeries)
-            
-            // Recupero poster migliorato (gestisce lazy-load di LiteSpeed)
-            val posterUrl = element.selectFirst("img")?.let { img ->
-                img.attr("data-src").ifBlank { 
-                    img.attr("data-lazy-src").ifBlank { 
-                        img.attr("src") 
-                    } 
-                }
-            }
+            val posterUrl = getPoster(element)
 
             newMovieSearchResponse(title, href, if (isSeries) TvType.TvSeries else TvType.Movie) {
                 this.posterUrl = posterUrl
             }
-        }
+        }.distinctBy { it.url }
 
-        Log.d("CB01", "Elementi trovati: ${items.size}")
+        Log.d("CB01", "Elementi trovati in ${request.name}: ${items.size}")
         return newHomePageResponse(request.name, items)
     }
 
@@ -78,17 +78,16 @@ class CbProvider : MainAPI() {
         val url = "$mainUrl/?s=$query"
         val document = app.get(url, headers = commonHeaders).document
         
-        return document.select("div.post-video, article.post").mapNotNull { element ->
-            val titleElement = element.selectFirst("h2 a") ?: return@mapNotNull null
+        return document.select("div.post-video, div.video-inner, article.post").mapNotNull { element ->
+            val titleElement = element.selectFirst("h2 a, h3 a") ?: return@mapNotNull null
             val href = titleElement.attr("href")
             val isSeries = href.contains("/serietv/")
             val title = fixTitle(titleElement.text(), !isSeries)
-            val posterUrl = element.selectFirst("img")?.attr("data-src") ?: element.selectFirst("img")?.attr("src")
 
             newMovieSearchResponse(title, href, if (isSeries) TvType.TvSeries else TvType.Movie) {
-                this.posterUrl = posterUrl
+                this.posterUrl = getPoster(element)
             }
-        }
+        }.distinctBy { it.url }
     }
 
     override suspend fun load(url: String): LoadResponse {
@@ -96,7 +95,7 @@ class CbProvider : MainAPI() {
         val isSeries = url.contains("/serietv/")
         
         val title = fixTitle(document.selectFirst("h1")?.text() ?: "", !isSeries)
-        val poster = document.selectFirst("div.entry-content img, img.responsive-locandina")?.attr("src")
+        val poster = document.selectFirst("div.entry-content img")?.attr("src")
                   ?: document.selectFirst("meta[property=\"og:image\"]")?.attr("content")
         
         val plot = document.selectFirst("div.entry-content p")?.text()?.substringAfter("Trama:")?.trim()
@@ -114,7 +113,7 @@ class CbProvider : MainAPI() {
                 episodes.add(newEpisode(videoLinks) { this.name = "Film" })
             }
         } else {
-            // Parsing Serie TV (gestisce i toggle sp-wrap visti in serie.txt)
+            // Parsing Serie TV dai blocchi toggle (sp-wrap)
             document.select("div.sp-wrap").forEachIndexed { index, wrap ->
                 val seasonName = wrap.selectFirst(".sp-head")?.text() ?: "Stagione ${index + 1}"
                 val seasonNum = Regex("\\d+").find(seasonName)?.value?.toIntOrNull() ?: (index + 1)
