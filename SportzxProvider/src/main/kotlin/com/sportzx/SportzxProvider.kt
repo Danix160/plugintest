@@ -36,15 +36,15 @@ class SportzxProvider : MainAPI() {
         val doc = app.get(url, headers = headers).document
         val title = doc.selectFirst("title")?.text()?.replace(" - SportzX TV", "") ?: "Live Stream"
 
-        // Usiamo il metodo più generico per evitare errori sui parametri nominati
-        return LiveStreamLoadResponse(
+        // Utilizziamo newLiveStreamLoadResponse come richiesto dal compilatore
+        // Firma: (name, url, apiName, dataUrl, posterUrl, type, quality, tags)
+        return newLiveStreamLoadResponse(
             title,
             url,
             this.name,
             url,
             null,
-            null,
-            null
+            TvType.Live
         )
     }
 
@@ -65,9 +65,10 @@ class SportzxProvider : MainAPI() {
                 val foundUrl = m3u8Regex.find(iframeRes)?.groupValues?.get(1)
 
                 if (foundUrl != null) {
-                    // Costruttore diretto di ExtractorLink (Source, Name, URL, Referer, Quality, isM3u8)
+                    // Utilizziamo newExtractorLink come richiesto dal compilatore
+                    // Firma: (source, name, url, referer, quality, isM3u8, headers, extractorData)
                     callback.invoke(
-                        ExtractorLink(
+                        newExtractorLink(
                             "SportzX",
                             "HD",
                             foundUrl,
