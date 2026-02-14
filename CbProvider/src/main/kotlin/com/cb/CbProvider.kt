@@ -40,7 +40,6 @@ class CbProvider : MainAPI() {
         }
     }
 
-    // Funzione helper per il parsing degli elementi (riutilizzata da search e mainPage)
     private fun parseElement(element: org.jsoup.nodes.Element, isTvSeriesSearch: Boolean = false): SearchResponse? {
         val titleElement = element.selectFirst("h2 a, h3 a, .card-title a, .post-title a, a[title]") ?: return null
         val href = titleElement.attr("href")
@@ -71,31 +70,47 @@ class CbProvider : MainAPI() {
         return newHomePageResponse(request.name, items)
     }
 
-    // --- LOGICA DI RICERCA DOPPIA (PARALLELA) ---
+    // --- RICERCA PROFONDA (DEEP SEARCH) ---
     override suspend fun search(query: String): List<SearchResponse> {
         val allResults = mutableListOf<SearchResponse>()
         
-        // Eseguiamo due ricerche: una globale e una specifica per le serie TV
-        val searchUrls = listOf(
-            "$mainUrl/?s=$query",          // Ricerca globale
-            "$mainUrl/serietv/?s=$query"   // Ricerca specifica Serie TV
+        // Cerchiamo sia nell'indice globale che in quello serie TV
+        val searchConfigs = listOf(
+            "$mainUrl/?s=$query" to false,
+            "$mainUrl/serietv/?s=$query" to true
         )
 
-        searchUrls.forEach { baseUrl ->
-            for (page in 1..2) { // 2 pagine per ogni sorgente (totale 4 pagine di risultati)
-                val url = if (page == 1) baseUrl else "${baseUrl.replace("?s=", "page/$page/?s=")}"
-                val response = try { app.get(url, headers = commonHeaders) } catch (e: Exception) { null }
+        searchConfigs.forEach { (baseUrl, isTv) ->
+            // Aumentato a 10 pagine per coprire tutti i risultati storici
+            for (page in 1..10) { 
+                val url = if (page == 1) baseUrl else {
+                    if (baseUrl.contains("serietv")) {
+                        "$mainUrl/serietv/page/$page/?s=$query"
+                    } else {
+                        "$mainUrl/page/$page/?s=$query"
+                    }
+                }
+                
+                val response = try { app.get(url, headers = commonHeaders, timeout = 10L) } catch (e: Exception) { null }
                 val document = response?.document ?: break
                 
-                val items = document.select("div.card, div.post-video, article, div.mp-post, div.post, li.item-list")
+                // Selettori più ampi per catturare ogni tipo di layout (nuovo e vecchio)
+                val items = document.select("div.card, div.post-video, article, div.mp-post, div.post, li.item-list, .result-item")
+                
+                // Se la pagina non ha risultati, interrompiamo il ciclo per questa sorgente
                 if (items.isEmpty()) break
 
                 items.forEach { element ->
-                    parseElement(element, baseUrl.contains("serietv"))?.let { allResults.add(it) }
+                    parseElement(element, isTv)?.let { allResults.add(it) }
                 }
+                
+                // Opzionale: Se la pagina ha meno di 5 risultati, probabilmente è l'ultima
+                if (items.size < 5) break
             }
         }
-        return allResults.distinctBy { it.url }
+        
+        // Ordiniamo per titolo e rimuoviamo duplicati
+        return allResults.distinctBy { it.url }.sortedByDescending { it.name.contains(query, ignoreCase = true) }
     }
 
     override suspend fun load(url: String): LoadResponse {
@@ -127,7 +142,6 @@ class CbProvider : MainAPI() {
                 episodes.add(newEpisode(finalLinks.joinToString("###")) { this.name = "Film - Streaming" })
             }
         } else {
-            // Parsing Episodi (Serie TV)
             document.select("div.sp-wrap, .entry-content table, .serie-tv-table").forEachIndexed { index, wrap ->
                 val seasonNum = index + 1
                 wrap.select(".sp-body p, .sp-body li, tr").forEach { row ->
