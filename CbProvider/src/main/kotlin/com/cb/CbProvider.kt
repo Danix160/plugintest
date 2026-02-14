@@ -22,7 +22,8 @@ class CbProvider : MainAPI() {
 
     private val supportedHosts = listOf(
         "voe", "mixdrop", "streamtape", "fastream", "filemoon", 
-        "wolfstream", "streamwish", "maxstream", "lulustream", "uprot", "stayonline", "swzz"
+        "wolfstream", "streamwish", "maxstream", "lulustream", 
+        "uprot", "stayonline", "swzz", "supervideo", "vidmoly"
     )
 
     override val mainPage = mainPageOf(
@@ -84,45 +85,32 @@ class CbProvider : MainAPI() {
         
         val title = fixTitle(document.selectFirst("h1")?.text() ?: "", !isSeries)
         val poster = document.selectFirst("meta[property=\"og:image\"]")?.attr("content")
-        
         val plot = document.select("div.ignore-css p").firstOrNull { it.text().length > 50 }?.text()
                   ?.substringBefore("+Info")?.trim()
-        
         val year = Regex("\\d{4}").find(document.selectFirst("h1")?.text() ?: "")?.value?.toIntOrNull()
 
         val episodes = mutableListOf<Episode>()
 
         if (!isSeries) {
-            val linkList = mutableListOf<String>()
+            val linkList = mutableSetOf<String>()
             
-            // 1. Cerca nei DIV con data-src (usato dai nuovi Tab di CB01)
-            document.select("div.tabs-catch-all[data-src]").forEach { div ->
-                linkList.add(div.attr("data-src"))
-            }
-
-            // 2. Cerca in tutti gli IFRAME (player incorporati)
-            document.select("iframe").forEach { iframe ->
-                val src = iframe.attr("src").ifBlank { iframe.attr("data-src") }
-                if (src.contains("stayonline") || supportedHosts.any { src.contains(it) }) {
-                    linkList.add(src)
+            // Scansione attributi data-src e iframe
+            document.select("div[data-src], div[data-link], li[data-src], iframe").forEach { el ->
+                val link = el.attr("data-src").ifBlank { el.attr("data-link").ifBlank { el.attr("src") } }
+                if (link.contains("http") && (supportedHosts.any { link.contains(it) } || link.contains("stayonline"))) {
+                    linkList.add(link)
                 }
             }
 
-            // 3. Cerca nelle TABELLE Streaming (quelle del tuo file film.txt)
-            document.select("table.tableinside a, table.cbtable a").forEach { a ->
+            // Scansione tabelle (fondamentale per Uprot/Maxstream)
+            document.select("table a, a.buttona_stream").forEach { a ->
                 val href = a.attr("href")
-                if (supportedHosts.any { href.contains(it) } || href.contains("stayonline")) {
+                if (href.startsWith("http") && (supportedHosts.any { href.contains(it) } || href.contains("stayonline"))) {
                     linkList.add(href)
                 }
             }
 
-            // 4. Cerca i bottoni colorati
-            document.select("a.buttona_stream, a.buttona_down").forEach { a ->
-                linkList.add(a.attr("href"))
-            }
-
-            val finalLinks = linkList.distinct().filter { it.startsWith("http") && !it.contains("youtube") }
-
+            val finalLinks = linkList.filter { !it.contains("youtube") }
             if (finalLinks.isNotEmpty()) {
                 episodes.add(newEpisode(finalLinks.joinToString("###")) { this.name = "Film - Streaming" })
             }
@@ -170,16 +158,22 @@ class CbProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         data.split("###").forEach { rawLink ->
+            Log.d("CB01_DEBUG", "Processando: $rawLink")
             var finalUrl: String? = rawLink
 
             if (rawLink.contains("stayonline.pro")) {
                 finalUrl = bypassStayOnline(rawLink)
-            } else if (rawLink.contains("uprot.net") || rawLink.contains("swzz.xyz")) {
+                Log.d("CB01_DEBUG", "StayOnline -> $finalUrl")
+            } 
+            else if (rawLink.contains("uprot.net") || rawLink.contains("swzz.xyz")) {
                 finalUrl = bypassShortener(rawLink)
+                Log.d("CB01_DEBUG", "Uprot/Shortener -> $finalUrl")
             }
 
             finalUrl?.let { l ->
-                if (l.startsWith("http")) loadExtractor(l, subtitleCallback, callback)
+                if (l.startsWith("http")) {
+                    loadExtractor(l, subtitleCallback, callback)
+                }
             }
         }
         return true
@@ -199,8 +193,20 @@ class CbProvider : MainAPI() {
 
     private suspend fun bypassShortener(link: String): String? {
         return try {
-            val response = app.get(link, headers = commonHeaders).document
-            response.selectFirst("a")?.attr("href")
-        } catch (e: Exception) { null }
+            // Seguiamo il reindirizzamento di Uprot
+            val response = app.get(link, headers = commonHeaders, allowRedirects = true)
+            val doc = response.document
+            
+            // Cerchiamo il link finale nella pagina di "attesa" di Uprot
+            val redirect = doc.select("a").firstOrNull { a ->
+                val href = a.attr("href")
+                supportedHosts.any { host -> href.contains(host) && !href.contains("uprot") }
+            }?.attr("href")
+            
+            redirect ?: response.url
+        } catch (e: Exception) { 
+            Log.e("CB01_DEBUG", "Errore bypass Uprot: ${e.message}")
+            null 
+        }
     }
 }
