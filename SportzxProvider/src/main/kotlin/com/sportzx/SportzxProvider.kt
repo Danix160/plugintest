@@ -4,6 +4,7 @@ import android.util.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
+import com.fasterxml.jackson.annotation.JsonProperty
 
 class SportzxProvider : MainAPI() {
     override var mainUrl = "https://sportzx.cc" 
@@ -12,61 +13,69 @@ class SportzxProvider : MainAPI() {
     override var lang = "it"
     override val supportedTypes = setOf(TvType.Live)
 
-    private val liveUrl = "$mainUrl/sportzx-live/"
-
+    // Header molto completi per simulare un browser reale
     private val commonHeaders = mapOf(
-        "Referer" to "$mainUrl/",
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Referer" to "$mainUrl/",
+        "Origin" to mainUrl
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
-        // Log per vedere se la funzione viene chiamata
-        Log.d("SportzX", "Caricamento Main Page da: $liveUrl")
+        Log.d("SportzX", "Inizio recupero dati...")
         
-        val res = app.get(liveUrl, headers = commonHeaders)
+        // 1. Proviamo a scaricare la pagina
+        val res = app.get("$mainUrl/sportzx-live/", headers = commonHeaders)
         val doc = res.document
         val items = mutableListOf<SearchResponse>()
 
-        // Selettore specifico per la struttura vsc-card
-        val cards = doc.select("div.vsc-card")
-        Log.d("SportzX", "Trovate ${cards.size} card nel documento")
+        // 2. Se la pagina è vuota (come dice il log), cerchiamo i dati dentro gli script
+        // Molti siti Elementor salvano i dati in un oggetto JSON chiamato 'vsc_data' o simili
+        val scriptData = doc.select("script").filter { it.data().contains("vsc-card") || it.data().contains("teams") }
+        
+        // Se non troviamo card nell'HTML, usiamo un selettore di emergenza molto largo
+        val cards = doc.select("div.vsc-card, .elementor-widget-container h3")
+        Log.d("SportzX", "Analisi HTML: trovati ${cards.size} elementi potenziali")
 
-        cards.forEach { card ->
-            val teams = card.select("div.vsc-team-name").map { it.text().trim() }
-            val time = card.selectFirst("div.vsc-time")?.text()?.trim() ?: ""
-            val league = card.selectFirst("span.vsc-league-text")?.text()?.trim() ?: ""
-            val imageUrl = card.selectFirst("img.vsc-league-logo")?.attr("src")
-
-            val title = if (teams.size >= 2) {
-                "$time ${teams[0]} VS ${teams[1]}"
-            } else if (league.isNotEmpty()) {
-                "$time $league"
-            } else {
-                "Evento Live"
+        if (cards.isEmpty()) {
+            // Tentativo disperato: se il sito è protetto, cerchiamo qualsiasi link che sembri un match
+            doc.select("a").forEach { 
+                val text = it.text()
+                if (text.contains("vs", ignoreCase = true) || it.attr("href").contains("live")) {
+                    items.add(newLiveSearchResponse(text, it.attr("href"), TvType.Live))
+                }
             }
+        } else {
+            cards.forEach { card ->
+                val teams = card.select(".vsc-team-name, h3").map { it.text().trim() }
+                val time = card.selectFirst(".vsc-time")?.text() ?: ""
+                val imageUrl = card.selectFirst("img")?.attr("src")
 
-            // Creazione sicura della risposta
-            val searchRes = newLiveSearchResponse(
-                name = title,
-                url = "$mainUrl/en-vivo/", // Pagina di destinazione generica
-                type = TvType.Live
-            ).apply { 
-                this.posterUrl = imageUrl 
+                val title = if (teams.isNotEmpty()) teams.joinToString(" VS ") else "Evento Live"
+                
+                items.add(newLiveSearchResponse(
+                    name = "$time $title".trim(),
+                    url = "$mainUrl/en-vivo/", 
+                    type = TvType.Live
+                ).apply { this.posterUrl = imageUrl })
             }
-            items.add(searchRes)
         }
-        
-        if (items.isEmpty()) Log.w("SportzX", "Nessun item trovato! Controlla i selettori.")
-        
-        return newHomePageResponse(listOf(HomePageList("Eventi SportzX Live", items)), false)
+
+        // Se ancora non c'è nulla, carichiamo i link diretti dalla pagina principale
+        if (items.isEmpty()) {
+            val home = app.get(mainUrl, headers = commonHeaders).document
+            home.select("a[href*='live'], a[href*='streaming']").forEach {
+                items.add(newLiveSearchResponse(it.text(), it.attr("href"), TvType.Live))
+            }
+        }
+
+        Log.d("SportzX", "Totale item pronti: ${items.size}")
+        return newHomePageResponse(listOf(HomePageList("Eventi in Diretta", items)), false)
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val doc = app.get(url, headers = commonHeaders).document
-        val title = doc.selectFirst("h3.vsc-modal-title")?.text() ?: "Diretta Live"
-
-        return newLiveStreamLoadResponse(title, url, url) {
+        // Carichiamo la pagina e forziamo il titolo
+        return newLiveStreamLoadResponse("SportzX Live", url, url) {
             this.apiName = this@SportzxProvider.name
             this.type = TvType.Live
         }
@@ -78,38 +87,26 @@ class SportzxProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        Log.d("SportzX", "Caricamento link da: $data")
-        val doc = app.get(data, headers = commonHeaders).document
+        val res = app.get(data, headers = commonHeaders)
+        val doc = res.document
         
-        // Cerca i link ai server nel modal (vsc-stream-link)
-        val serverLinks = doc.select("a.vsc-stream-link").map { it.attr("href") }
-        Log.d("SportzX", "Trovati ${serverLinks.size} link server")
+        // Cerchiamo i link vsc-stream-link o iframe
+        val links = doc.select("a.vsc-stream-link, iframe").map { 
+            if (it.tagName() == "a") it.attr("href") else it.attr("src") 
+        }
 
-        serverLinks.distinct().forEach { serverUrl ->
-            val finalUrl = if (serverUrl.startsWith("/")) mainUrl + serverUrl else serverUrl
-            
+        links.distinct().filter { it.isNotBlank() }.forEach { link ->
+            val finalUrl = if (link.startsWith("/")) mainUrl + link else link
             try {
-                // Ogni server ha bisogno del suo referer specifico per sbloccare l'm3u8
-                val serverPage = app.get(finalUrl, referer = data, headers = commonHeaders).text
-                val m3u8Regex = Regex("""(?:file|source|src|url)\s*[:=]\s*["'](https?.*?\.m3u8.*?)["']""")
-                val streamUrl = m3u8Regex.find(serverPage)?.groupValues?.get(1)
-
-                if (streamUrl != null) {
+                val text = app.get(finalUrl, referer = data, headers = commonHeaders).text
+                val m3u8 = Regex("""["'](https?.*?\.m3u8.*?)["']""").find(text)?.groupValues?.get(1)
+                
+                if (m3u8 != null) {
                     callback(
-                        newExtractorLink(
-                            source = this.name,
-                            name = "Server " + finalUrl.substringAfter("://").substringBefore("/"),
-                            url = streamUrl,
-                            type = ExtractorLinkType.M3U8
-                        ) {
-                            this.quality = Qualities.P1080.value
-                            this.referer = finalUrl
-                        }
+                        newExtractorLink(this.name, "Server HD", m3u8, finalUrl, Qualities.P1080.value, true)
                     )
                 }
-            } catch (e: Exception) {
-                Log.e("SportzX", "Errore nel server $finalUrl: ${e.message}")
-            }
+            } catch (e: Exception) { }
         }
         return true
     }
