@@ -22,7 +22,7 @@ class CbProvider : MainAPI() {
 
     private val supportedHosts = listOf(
         "voe", "mixdrop", "streamtape", "fastream", "filemoon", 
-        "wolfstream", "streamwish", "maxstream", "lulustream", "uprot", "stayonline"
+        "wolfstream", "streamwish", "maxstream", "lulustream", "uprot", "stayonline", "swzz"
     )
 
     override val mainPage = mainPageOf(
@@ -45,7 +45,6 @@ class CbProvider : MainAPI() {
         val items = document.select("div.card.mp-post, div.post-video, article.post").mapNotNull { element ->
             val titleElement = element.selectFirst(".card-title a, h3 a, h2 a") ?: return@mapNotNull null
             val href = titleElement.attr("href")
-            
             if (href.contains("/tag/") || href.contains("/category/") || href.length < 10) return@mapNotNull null
 
             val isSeries = href.contains("/serietv/") || request.data.contains("serietv")
@@ -68,17 +67,13 @@ class CbProvider : MainAPI() {
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/?s=$query"
         val document = app.get(url, headers = commonHeaders).document
-        
         return document.select("div.card, div.post-video, article").mapNotNull { element ->
             val titleElement = element.selectFirst(".card-title a, h3 a, h2 a") ?: return@mapNotNull null
             val href = titleElement.attr("href")
             val isSeries = href.contains("/serietv/")
             val title = fixTitle(titleElement.text(), !isSeries)
-            
-            val posterUrl = element.selectFirst("img")?.attr("src")
-
             newMovieSearchResponse(title, href, if (isSeries) TvType.TvSeries else TvType.Movie) {
-                this.posterUrl = posterUrl
+                this.posterUrl = element.selectFirst("img")?.attr("src")
             }
         }.distinctBy { it.url }
     }
@@ -89,9 +84,7 @@ class CbProvider : MainAPI() {
         
         val title = fixTitle(document.selectFirst("h1")?.text() ?: "", !isSeries)
         val poster = document.selectFirst("meta[property=\"og:image\"]")?.attr("content")
-                  ?: document.selectFirst("div.card-image img")?.attr("src")
-
-        // Estrazione Trama da film.txt (div.ignore-css)
+        
         val plot = document.select("div.ignore-css p").firstOrNull { it.text().length > 50 }?.text()
                   ?.substringBefore("+Info")?.trim()
         
@@ -102,40 +95,49 @@ class CbProvider : MainAPI() {
         if (!isSeries) {
             val linkList = mutableListOf<String>()
             
-            // Cerca negli iframe (Stayonline)
-            document.select("iframe.cb01iframe").forEach { iframe ->
-                val src = iframe.attr("src")
-                if (src.isNotBlank()) linkList.add(src)
+            // 1. Cerca nei DIV con data-src (usato dai nuovi Tab di CB01)
+            document.select("div.tabs-catch-all[data-src]").forEach { div ->
+                linkList.add(div.attr("data-src"))
             }
-            
-            // Cerca nei bottoni streaming/download
-            document.select("a.buttona_stream, a.buttona_down, div.buttona_group a").forEach { btn ->
-                val href = btn.attr("href")
-                if (href.startsWith("http") && supportedHosts.any { href.contains(it) }) {
+
+            // 2. Cerca in tutti gli IFRAME (player incorporati)
+            document.select("iframe").forEach { iframe ->
+                val src = iframe.attr("src").ifBlank { iframe.attr("data-src") }
+                if (src.contains("stayonline") || supportedHosts.any { src.contains(it) }) {
+                    linkList.add(src)
+                }
+            }
+
+            // 3. Cerca nelle TABELLE Streaming (quelle del tuo file film.txt)
+            document.select("table.tableinside a, table.cbtable a").forEach { a ->
+                val href = a.attr("href")
+                if (supportedHosts.any { href.contains(it) } || href.contains("stayonline")) {
                     linkList.add(href)
                 }
             }
 
-            if (linkList.isNotEmpty()) {
-                episodes.add(newEpisode(linkList.distinct().joinToString("###")) { 
-                    this.name = "Film - Riproduci" 
-                })
+            // 4. Cerca i bottoni colorati
+            document.select("a.buttona_stream, a.buttona_down").forEach { a ->
+                linkList.add(a.attr("href"))
+            }
+
+            val finalLinks = linkList.distinct().filter { it.startsWith("http") && !it.contains("youtube") }
+
+            if (finalLinks.isNotEmpty()) {
+                episodes.add(newEpisode(finalLinks.joinToString("###")) { this.name = "Film - Streaming" })
             }
         } else {
-            // Logica Serie TV da serie.txt (blocchi sp-wrap)
+            // Logica Serie TV
             document.select("div.sp-wrap").forEachIndexed { index, wrap ->
-                val seasonName = wrap.selectFirst(".sp-head")?.text() ?: "Stagione ${index + 1}"
-                val seasonNum = Regex("\\d+").find(seasonName)?.value?.toIntOrNull() ?: (index + 1)
-                
+                val seasonNum = index + 1
                 wrap.select(".sp-body p, .sp-body li").forEach { row ->
                     val links = row.select("a").filter { a -> 
                         val h = a.attr("href")
-                        supportedHosts.any { host -> h.contains(host) } 
+                        supportedHosts.any { host -> h.contains(host) } || h.contains("stayonline")
                     }
                     if (links.isNotEmpty()) {
                         val text = row.text()
                         val epNum = Regex("(?i)episodio\\s?(\\d+)").find(text)?.groupValues?.get(1)?.toIntOrNull()
-                        
                         episodes.add(newEpisode(links.joinToString("###") { it.attr("href") }) {
                             this.name = text.split("-").first().trim()
                             this.season = seasonNum
@@ -170,15 +172,14 @@ class CbProvider : MainAPI() {
         data.split("###").forEach { rawLink ->
             var finalUrl: String? = rawLink
 
-            // Bypass dei link aggregatori di CB01
             if (rawLink.contains("stayonline.pro")) {
                 finalUrl = bypassStayOnline(rawLink)
-            } else if (rawLink.contains("uprot.net")) {
-                finalUrl = bypassUprot(rawLink)
+            } else if (rawLink.contains("uprot.net") || rawLink.contains("swzz.xyz")) {
+                finalUrl = bypassShortener(rawLink)
             }
 
             finalUrl?.let { l ->
-                loadExtractor(l, subtitleCallback, callback)
+                if (l.startsWith("http")) loadExtractor(l, subtitleCallback, callback)
             }
         }
         return true
@@ -186,7 +187,7 @@ class CbProvider : MainAPI() {
 
     private suspend fun bypassStayOnline(link: String): String? {
         return try {
-            val id = link.split("/").filter { it.isNotBlank() }.last()
+            val id = link.split("/").last { it.isNotBlank() }
             val response = app.post(
                 "https://stayonline.pro/ajax/linkEmbedView.php",
                 headers = mapOf("X-Requested-With" to "XMLHttpRequest", "Referer" to link),
@@ -196,7 +197,7 @@ class CbProvider : MainAPI() {
         } catch (e: Exception) { null }
     }
 
-    private suspend fun bypassUprot(link: String): String? {
+    private suspend fun bypassShortener(link: String): String? {
         return try {
             val response = app.get(link, headers = commonHeaders).document
             response.selectFirst("a")?.attr("href")
