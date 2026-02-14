@@ -40,13 +40,9 @@ class CbProvider : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = if (page <= 1) request.data else "${request.data.removeSuffix("/")}/page/$page/"
-        Log.d("CB01", "Richiesta URL: $url")
-        
         val document = app.get(url, headers = commonHeaders).document
         
-        // Selettore basato sul tuo file stagioni.txt: cerchiamo le card di Sequex
         val items = document.select("div.card.mp-post, div.post-video, article.post").mapNotNull { element ->
-            // Cerchiamo il link nel card-title o nel primo h3/h2
             val titleElement = element.selectFirst(".card-title a, h3 a, h2 a") ?: return@mapNotNull null
             val href = titleElement.attr("href")
             
@@ -55,12 +51,9 @@ class CbProvider : MainAPI() {
             val isSeries = href.contains("/serietv/") || request.data.contains("serietv")
             val title = fixTitle(titleElement.text(), !isSeries)
             
-            // Poster: cerchiamo dentro card-image img
             val posterUrl = element.selectFirst(".card-image img, img")?.let { img ->
                 img.attr("data-lazy-src").ifBlank { 
-                    img.attr("data-src").ifBlank { 
-                        img.attr("src") 
-                    } 
+                    img.attr("data-src").ifBlank { img.attr("src") } 
                 }
             }
 
@@ -69,7 +62,6 @@ class CbProvider : MainAPI() {
             }
         }.distinctBy { it.url }
 
-        Log.d("CB01", "Elementi trovati: ${items.size}")
         return newHomePageResponse(request.name, items)
     }
 
@@ -96,31 +88,49 @@ class CbProvider : MainAPI() {
         val isSeries = url.contains("/serietv/")
         
         val title = fixTitle(document.selectFirst("h1")?.text() ?: "", !isSeries)
-        val poster = document.selectFirst("div.entry-content img, .card-image img")?.attr("src")
-                  ?: document.selectFirst("meta[property=\"og:image\"]")?.attr("content")
+        val poster = document.selectFirst("meta[property=\"og:image\"]")?.attr("content")
+                  ?: document.selectFirst("div.card-image img")?.attr("src")
+
+        // Estrazione Trama da film.txt (div.ignore-css)
+        val plot = document.select("div.ignore-css p").firstOrNull { it.text().length > 50 }?.text()
+                  ?.substringBefore("+Info")?.trim()
         
-        val plot = document.selectFirst("div.entry-content p")?.text()?.substringAfter("Trama:")?.trim()
-        val year = document.selectFirst("a[href*='/anno/'], a[href*='/tag/anno-']")?.text()?.toIntOrNull()
+        val year = Regex("\\d{4}").find(document.selectFirst("h1")?.text() ?: "")?.value?.toIntOrNull()
 
         val episodes = mutableListOf<Episode>()
 
         if (!isSeries) {
-            val videoLinks = document.select("div.entry-content a").filter { a ->
-                val href = a.attr("href")
-                supportedHosts.any { host -> href.contains(host, ignoreCase = true) }
-            }.joinToString("###") { it.attr("href") }
+            val linkList = mutableListOf<String>()
+            
+            // Cerca negli iframe (Stayonline)
+            document.select("iframe.cb01iframe").forEach { iframe ->
+                val src = iframe.attr("src")
+                if (src.isNotBlank()) linkList.add(src)
+            }
+            
+            // Cerca nei bottoni streaming/download
+            document.select("a.buttona_stream, a.buttona_down, div.buttona_group a").forEach { btn ->
+                val href = btn.attr("href")
+                if (href.startsWith("http") && supportedHosts.any { href.contains(it) }) {
+                    linkList.add(href)
+                }
+            }
 
-            if (videoLinks.isNotBlank()) {
-                episodes.add(newEpisode(videoLinks) { this.name = "Film" })
+            if (linkList.isNotEmpty()) {
+                episodes.add(newEpisode(linkList.distinct().joinToString("###")) { 
+                    this.name = "Film - Riproduci" 
+                })
             }
         } else {
+            // Logica Serie TV da serie.txt (blocchi sp-wrap)
             document.select("div.sp-wrap").forEachIndexed { index, wrap ->
                 val seasonName = wrap.selectFirst(".sp-head")?.text() ?: "Stagione ${index + 1}"
                 val seasonNum = Regex("\\d+").find(seasonName)?.value?.toIntOrNull() ?: (index + 1)
                 
                 wrap.select(".sp-body p, .sp-body li").forEach { row ->
                     val links = row.select("a").filter { a -> 
-                        supportedHosts.any { h -> a.attr("href").contains(h) } 
+                        val h = a.attr("href")
+                        supportedHosts.any { host -> h.contains(host) } 
                     }
                     if (links.isNotEmpty()) {
                         val text = row.text()
@@ -160,6 +170,7 @@ class CbProvider : MainAPI() {
         data.split("###").forEach { rawLink ->
             var finalUrl: String? = rawLink
 
+            // Bypass dei link aggregatori di CB01
             if (rawLink.contains("stayonline.pro")) {
                 finalUrl = bypassStayOnline(rawLink)
             } else if (rawLink.contains("uprot.net")) {
