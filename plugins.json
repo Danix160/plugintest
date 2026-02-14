@@ -13,7 +13,7 @@
             "Movie",
             "TvSeries"
         ],
-        "version": 49,
+        "version": 50,
         "internalName": "CineblogProvider",
         "description": "cineblog001.club",
         "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/CineblogProvider.cs3",
