@@ -6,6 +6,7 @@ import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.MainAPI
 import com.lagradost.cloudstream3.TvType
 import org.json.JSONObject
+import com.cb.extractors.MaxStreamExtractor // AGGIUNTO QUI: Importiamo l'estrattore
 
 class CbProvider : MainAPI() {
     override var mainUrl = "https://cb01uno.one"
@@ -94,7 +95,6 @@ class CbProvider : MainAPI() {
         if (!isSeries) {
             val linkList = mutableSetOf<String>()
             
-            // Scansione attributi e tabelle
             document.select("div[data-src], div[data-link], li[data-src], iframe, table a, a.buttona_stream").forEach { el ->
                 val link = el.attr("data-src").ifBlank { 
                     el.attr("data-link").ifBlank { 
@@ -111,7 +111,6 @@ class CbProvider : MainAPI() {
                 episodes.add(newEpisode(finalLinks.joinToString("###")) { this.name = "Film - Streaming" })
             }
         } else {
-            // Logica Serie TV (Parsing abbreviato per brevità)
             document.select("div.sp-wrap").forEachIndexed { index, wrap ->
                 val seasonNum = index + 1
                 wrap.select(".sp-body p, .sp-body li").forEach { row ->
@@ -154,18 +153,25 @@ class CbProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         data.split("###").forEach { rawLink ->
-            var finalUrl: String? = rawLink
-
-            if (rawLink.contains("stayonline.pro")) {
-                finalUrl = bypassStayOnline(rawLink)
+            // AGGIUNTO QUI: Gestione speciale per MaxStream che usa il nuovo estrattore
+            if (rawLink.contains("uprot.net") && rawLink.contains("msf")) {
+                MaxStreamExtractor().getUrl(rawLink, mainUrl, subtitleCallback, callback)
             } 
-            else if (rawLink.contains("uprot.net") || rawLink.contains("swzz.xyz")) {
-                finalUrl = bypassShortener(rawLink)
-            }
+            else {
+                var finalUrl: String? = rawLink
 
-            finalUrl?.let { l ->
-                if (l.startsWith("http") && !supportedHosts.any { l.contains(it) && l.contains("uprot") }) {
-                    loadExtractor(l, subtitleCallback, callback)
+                if (rawLink.contains("stayonline.pro")) {
+                    finalUrl = bypassStayOnline(rawLink)
+                } 
+                else if (rawLink.contains("uprot.net") || rawLink.contains("swzz.xyz")) {
+                    finalUrl = bypassShortener(rawLink)
+                }
+
+                finalUrl?.let { l ->
+                    // Evitiamo di ricaricare uprot se è già stato gestito sopra
+                    if (l.startsWith("http") && !l.contains("uprot.net")) {
+                        loadExtractor(l, subtitleCallback, callback)
+                    }
                 }
             }
         }
@@ -186,13 +192,11 @@ class CbProvider : MainAPI() {
 
     private suspend fun bypassShortener(link: String): String? {
         return try {
-            // Tentativo 1: Vedere se l'URL stesso reindirizza (301/302)
             val req = app.get(link, headers = commonHeaders, allowRedirects = true)
             if (req.url != link && supportedHosts.any { req.url.contains(it) && !req.url.contains("uprot") }) {
                 return req.url
             }
 
-            // Tentativo 2: Scansione script e meta refresh
             val doc = req.document
             val scriptLinks = doc.select("script").map { it.data() }
                 .flatMap { Regex("""https?://[^\s"']+""").findAll(it).map { m -> m.value }.toList() }
@@ -201,7 +205,6 @@ class CbProvider : MainAPI() {
                 supportedHosts.any { s.contains(it) } && !s.contains("uprot") && !s.contains("swzz")
             }
 
-            // Tentativo 3: Selettore specifico per il tasto "Continue" di Uprot
             found ?: doc.select("a.btn, .download-link, #download a").firstOrNull { a ->
                 val href = a.attr("href")
                 supportedHosts.any { href.contains(it) }
