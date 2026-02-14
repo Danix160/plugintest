@@ -1,5 +1,6 @@
 package com.cb
 
+import android.util.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.MainAPI
@@ -17,7 +18,6 @@ class CbProvider : MainAPI() {
     private val commonHeaders = mapOf(
         "Referer" to "$mainUrl/",
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "X-Requested-With" to "XMLHttpRequest"
     )
 
     private val supportedHosts = listOf(
@@ -32,33 +32,45 @@ class CbProvider : MainAPI() {
 
     private fun fixTitle(title: String, isMovie: Boolean): String {
         return if (isMovie) {
-            title.replace(Regex("""(?i)streaming|\[HD]|film gratis by cb01 official|\(\d{4}\)"""), "").trim()
+            title.replace(Regex("(?i)streaming|\\[HD]|film gratis by cb01 official|\\(\\d{4}\\)"), "").trim()
         } else {
-            title.replace(Regex("""(?i)streaming|serie tv gratis by cb01 official|stagione \d+|completa|[-–] ITA|[-–] HD"""), "").trim()
+            title.replace(Regex("(?i)streaming|serie tv gratis by cb01 official|stagione \\d+|completa|[-–] ITA|[-–] HD"), "").trim()
         }
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val url = if (page <= 1) {
-            request.data
-        } else {
-            "${request.data.removeSuffix("/")}/page/$page/"
-        }
+        val url = if (page <= 1) request.data else "${request.data.removeSuffix("/")}/page/$page/"
         
-        val document = app.get(url, headers = commonHeaders).document
+        // Debug Log
+        Log.d("CB01", "Chiamata URL: $url")
         
-        val items = document.select("div.post-video, div.box-film, article.post").mapNotNull { element ->
-            val titleElement = element.selectFirst("h2 a") ?: return@mapNotNull null
-            val isMovie = !titleElement.attr("href").contains("/serietv/")
-            val title = fixTitle(titleElement.text(), isMovie)
+        val response = app.get(url, headers = commonHeaders)
+        val document = response.document
+        
+        // Selettore espanso: cerca sia div.post-video che article.post
+        val items = document.select("div.post-video, article.post, .box-film").mapNotNull { element ->
+            val titleElement = element.selectFirst("h2 a, h3 a, .title a") ?: return@mapNotNull null
             val href = titleElement.attr("href")
-            val posterUrl = element.selectFirst("img")?.attr("data-src") 
-                         ?: element.selectFirst("img")?.attr("src")
+            
+            // Logica per determinare se è una serie TV dall'URL o dal titolo
+            val isSeries = href.contains("/serietv/") || request.data.contains("serietv")
+            val title = fixTitle(titleElement.text(), !isSeries)
+            
+            // Recupero poster migliorato (gestisce lazy-load di LiteSpeed)
+            val posterUrl = element.selectFirst("img")?.let { img ->
+                img.attr("data-src").ifBlank { 
+                    img.attr("data-lazy-src").ifBlank { 
+                        img.attr("src") 
+                    } 
+                }
+            }
 
-            newMovieSearchResponse(title, href, if (isMovie) TvType.Movie else TvType.TvSeries) {
+            newMovieSearchResponse(title, href, if (isSeries) TvType.TvSeries else TvType.Movie) {
                 this.posterUrl = posterUrl
             }
         }
+
+        Log.d("CB01", "Elementi trovati: ${items.size}")
         return newHomePageResponse(request.name, items)
     }
 
@@ -66,15 +78,14 @@ class CbProvider : MainAPI() {
         val url = "$mainUrl/?s=$query"
         val document = app.get(url, headers = commonHeaders).document
         
-        return document.select("div.post-video, div.box-film, article.post").mapNotNull { element ->
+        return document.select("div.post-video, article.post").mapNotNull { element ->
             val titleElement = element.selectFirst("h2 a") ?: return@mapNotNull null
-            val isMovie = !titleElement.attr("href").contains("/serietv/")
-            val title = fixTitle(titleElement.text(), isMovie)
             val href = titleElement.attr("href")
-            val posterUrl = element.selectFirst("img")?.attr("data-src") 
-                         ?: element.selectFirst("img")?.attr("src")
+            val isSeries = href.contains("/serietv/")
+            val title = fixTitle(titleElement.text(), !isSeries)
+            val posterUrl = element.selectFirst("img")?.attr("data-src") ?: element.selectFirst("img")?.attr("src")
 
-            newMovieSearchResponse(title, href, if (isMovie) TvType.Movie else TvType.TvSeries) {
+            newMovieSearchResponse(title, href, if (isSeries) TvType.TvSeries else TvType.Movie) {
                 this.posterUrl = posterUrl
             }
         }
@@ -92,39 +103,35 @@ class CbProvider : MainAPI() {
         val year = document.selectFirst("a[href*='/anno/'], a[href*='/tag/anno-']")?.text()?.toIntOrNull()
 
         val episodes = mutableListOf<Episode>()
-        val entryContent = document.selectFirst("div.entry-content")
 
         if (!isSeries) {
-            val videoLinks = entryContent?.select("a")?.filter { a ->
+            val videoLinks = document.select("div.entry-content a").filter { a ->
                 val href = a.attr("href")
                 supportedHosts.any { host -> href.contains(host, ignoreCase = true) }
-            }?.joinToString("###") { it.attr("href") }
+            }.joinToString("###") { it.attr("href") }
 
-            if (!videoLinks.isNullOrBlank()) {
+            if (videoLinks.isNotBlank()) {
                 episodes.add(newEpisode(videoLinks) { this.name = "Film" })
             }
         } else {
-            // Gestione Serie TV: Cerca blocchi sp-wrap (tendine) o paragrafi con link
-            val containers = document.select("div.sp-wrap")
-            if (containers.isNotEmpty()) {
-                containers.forEachIndexed { index, wrap ->
-                    val seasonName = wrap.selectFirst(".sp-head")?.text() ?: "Stagione ${index + 1}"
-                    val seasonNum = Regex("""\d+""").find(seasonName)?.value?.toIntOrNull() ?: (index + 1)
-                    
-                    wrap.select(".sp-body p, .sp-body li").forEach { row ->
-                        val links = row.select("a").filter { a -> 
-                            supportedHosts.any { h -> a.attr("href").contains(h) } 
-                        }
-                        if (links.isNotEmpty()) {
-                            val text = row.text()
-                            val epNum = Regex("""(?i)episodio\s?(\d+)""").find(text)?.groupValues?.get(1)?.toIntOrNull()
-                            
-                            episodes.add(newEpisode(links.joinToString("###") { it.attr("href") }) {
-                                this.name = text.split("-").first().trim().ifBlank { "Episodio $epNum" }
-                                this.season = seasonNum
-                                this.episode = epNum
-                            })
-                        }
+            // Parsing Serie TV (gestisce i toggle sp-wrap visti in serie.txt)
+            document.select("div.sp-wrap").forEachIndexed { index, wrap ->
+                val seasonName = wrap.selectFirst(".sp-head")?.text() ?: "Stagione ${index + 1}"
+                val seasonNum = Regex("\\d+").find(seasonName)?.value?.toIntOrNull() ?: (index + 1)
+                
+                wrap.select(".sp-body p, .sp-body li").forEach { row ->
+                    val links = row.select("a").filter { a -> 
+                        supportedHosts.any { h -> a.attr("href").contains(h) } 
+                    }
+                    if (links.isNotEmpty()) {
+                        val text = row.text()
+                        val epNum = Regex("(?i)episodio\\s?(\\d+)").find(text)?.groupValues?.get(1)?.toIntOrNull()
+                        
+                        episodes.add(newEpisode(links.joinToString("###") { it.attr("href") }) {
+                            this.name = text.split("-").first().trim()
+                            this.season = seasonNum
+                            this.episode = epNum
+                        })
                     }
                 }
             }
