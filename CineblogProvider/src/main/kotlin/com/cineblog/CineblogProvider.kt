@@ -54,7 +54,6 @@ class CineblogProvider : MainAPI() {
 
         var title = this.selectFirst("h2, h3, .m-title")?.text() ?: a.attr("title").ifEmpty { a.text() }
         
-        // Pulizia titolo: rimuove streaming, stagioni e punteggiatura sporca
         title = title.replace(Regex("""(?i)(\d+x\d+|Stagion[ei]\s+\d+|streaming)"""), "")
                      .replace(Regex("""[\-\s,._/]+$"""), "").trim()
 
@@ -72,7 +71,6 @@ class CineblogProvider : MainAPI() {
     override suspend fun load(url: String): LoadResponse? {
         val doc = app.get(url).document
         
-        // --- PULIZIA TITOLO ---
         var title = doc.selectFirst("h1")?.text()?.trim() ?: return null
         title = title.replace(Regex("""(?i)(\s+\d+x\d+.*|Stagion[ei]\s+\d+.*|streaming)"""), "")
                      .replace(Regex("""[\-\s,._/]+$"""), "").trim()
@@ -82,11 +80,25 @@ class CineblogProvider : MainAPI() {
             ?: doc.selectFirst(".story-poster img, .m-img img, img[itemprop='image']")?.attr("src")
         )
 
-        // --- PULIZIA TRAMA (FILM E SERIE) ---
-        var plot = doc.selectFirst("meta[name='description']")?.attr("content")
-        plot = plot?.replace(Regex("""(?i).*?(?:streaming|treaming).*?(?:serie tv|film).*?(?:cb01|cineblog\d*01)"""), "")
-                   ?.replace(Regex("""^[\s,.:;–\-]+"""), "") // Rimuove punteggiatura residua all'inizio
-                   ?.trim()
+        // --- PULIZIA TRAMA SUPER AVANZATA ---
+        var rawPlot = doc.selectFirst("meta[name='description']")?.attr("content") ?: ""
+        
+        // 1. Rimuove pattern di spam specifici compresa la virgola finale
+        var cleanPlot = rawPlot.replace(Regex("""(?i).*?(?:streaming|treaming).*?(?:serie tv|film).*?(?:cb01|cineblog\d*01)\s*[,.:;\-–]*"""), "")
+                               .replace(Regex("""(?i)cineblog\d*01\s*[,.:;\-–]*"""), "")
+                               .replace(Regex("""(?i)cb01\s*[,.:;\-–]*"""), "")
+                               .replace(Regex("""^[\s,.:;–\-]+"""), "") // Pulisce i rimasugli all'inizio
+                               .trim()
+
+        // 2. Rimuove la ripetizione della trama (se il sito la incolla due volte)
+        val half = cleanPlot.length / 2
+        if (half > 10) {
+            val firstHalf = cleanPlot.substring(0, half).trim()
+            val secondHalf = cleanPlot.substring(half).trim()
+            if (secondHalf.contains(firstHalf) || firstHalf.contains(secondHalf)) {
+                cleanPlot = firstHalf
+            }
+        }
 
         val seasonContainer = doc.selectFirst(".tt_season")
         
@@ -117,12 +129,12 @@ class CineblogProvider : MainAPI() {
 
             newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodesList.distinctBy { "${it.season}-${it.episode}" }) {
                 this.posterUrl = poster
-                this.plot = plot
+                this.plot = cleanPlot
             }
         } else {
             newMovieLoadResponse(title, url, TvType.Movie, url) {
                 this.posterUrl = poster
-                this.plot = plot
+                this.plot = cleanPlot
             }
         }
     }
