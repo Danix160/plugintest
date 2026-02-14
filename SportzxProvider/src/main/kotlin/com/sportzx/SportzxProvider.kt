@@ -6,11 +6,15 @@ import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 
 class SportzxProvider : MainAPI() {
-    override var mainUrl = "https://sportzx.cc"
+    // Il dominio base per i referer
+    override var mainUrl = "https://sportzx.cc" 
     override var name = "SportzX"
     override val hasMainPage = true
     override var lang = "it"
     override val supportedTypes = setOf(TvType.Live)
+
+    // Definiamo l'URL specifico della home con la griglia vsc-grid
+    private val liveUrl = "$mainUrl/sportzx-live/"
 
     private val headers = mapOf(
         "Referer" to "$mainUrl/",
@@ -18,40 +22,40 @@ class SportzxProvider : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
-        // Carichiamo la pagina sportzx-live che contiene la griglia vsc-grid
-        val doc = app.get("$mainUrl/sportzx-live/", headers = headers).document
+        // Fondamentale: usiamo liveUrl invece di mainUrl
+        val doc = app.get(liveUrl, headers = headers).document
         val items = mutableListOf<SearchResponse>()
 
-        // Basato sull'HTML reale del tuo file home.txt
+        // Selettori basati sulla struttura vsc-card del tuo file home.txt
         doc.select("div.vsc-card").forEach { card ->
             val teams = card.select("div.vsc-team-name").map { it.text().trim() }
             val time = card.selectFirst("div.vsc-time")?.text()?.trim() ?: ""
             val league = card.selectFirst("span.vsc-league-text")?.text()?.trim() ?: ""
-            
-            // Costruiamo un titolo leggibile: "10:30 - TeamA VS TeamB (League)"
+            val image = card.selectFirst("img.vsc-league-logo")?.attr("src")
+
             val title = if (teams.size >= 2) {
-                "$time ${teams[0]} VS ${teams[1]} ($league)"
-            } else if (teams.size == 1) {
-                "$time ${teams[0]} ($league)"
+                "$time ${teams[0]} VS ${teams[1]}"
             } else {
-                league
+                "$time $league"
             }
 
             if (title.isNotEmpty()) {
                 items.add(newLiveSearchResponse(
                     title,
-                    "$mainUrl/en-vivo/", // Le card sembrano puntare tutte alla pagina del player
-                    TvType.Live
+                    // Puntiamo alla pagina che apre il modal dei server
+                    "$mainUrl/en-vivo/", 
+                    TvType.Live,
+                    image
                 ))
             }
         }
         
-        return newHomePageResponse(listOf(HomePageList("Eventi Live", items)), false)
+        return newHomePageResponse(listOf(HomePageList("Eventi SportzX Live", items)), false)
     }
 
     override suspend fun load(url: String): LoadResponse {
         val doc = app.get(url, headers = headers).document
-        val title = doc.selectFirst("title")?.text()?.replace(" - SportzX TV", "") ?: "Live Stream"
+        val title = doc.selectFirst("h3.vsc-modal-title")?.text() ?: "Diretta Live"
 
         return newLiveStreamLoadResponse(title, url, url) {
             this.apiName = this@SportzxProvider.name
@@ -67,45 +71,33 @@ class SportzxProvider : MainAPI() {
     ): Boolean {
         val doc = app.get(data, headers = headers).document
         
-        // Il sito usa un sistema di "modal" con link ai vari server
-        val links = mutableListOf<String>()
-        
-        // 1. Cerchiamo i link diretti dei server (dal tuo file selezione.txt)
-        doc.select("a.vsc-stream-link").forEach { links.add(it.attr("href")) }
-        
-        // 2. Cerchiamo eventuali iframe se i link sopra non ci sono
-        if (links.isEmpty()) {
-            doc.select("iframe").forEach { links.add(it.attr("src")) }
-        }
+        // Estraiamo i link dei server (classe vsc-stream-link)
+        val serverLinks = doc.select("a.vsc-stream-link").map { it.attr("href") }
 
-        links.distinct().filter { it.isNotBlank() }.forEach { linkUrl ->
-            // Se il link è relativo, lo rendiamo assoluto
-            val fullUrl = if (linkUrl.startsWith("/")) mainUrl + linkUrl else linkUrl
+        serverLinks.distinct().forEach { serverUrl ->
+            val finalUrl = if (serverUrl.startsWith("/")) mainUrl + serverUrl else serverUrl
             
-            if (fullUrl.contains("topstream") || fullUrl.contains("clonemy") || fullUrl.contains("stream")) {
-                try {
-                    val iframeContent = app.get(fullUrl, referer = data, headers = headers).text
-                    
-                    // Regex specifica per file m3u8
-                    val m3u8Regex = Regex("""(?:file|source|src|url)\s*[:=]\s*["'](https?.*?\.m3u8.*?)["']""")
-                    val foundM3u8 = m3u8Regex.find(iframeContent)?.groupValues?.get(1)
+            try {
+                // Fondamentale passare il referer corretto per i server come topstream
+                val serverPage = app.get(finalUrl, referer = data, headers = headers).text
+                val m3u8Regex = Regex("""(?:file|source|src|url)\s*[:=]\s*["'](https?.*?\.m3u8.*?)["']""")
+                val streamUrl = m3u8Regex.find(serverPage)?.groupValues?.get(1)
 
-                    if (foundM3u8 != null) {
-                        callback(
-                            newExtractorLink(
-                                source = this.name,
-                                name = "Server " + fullUrl.substringAfter("://").substringBefore("."),
-                                url = foundM3u8,
-                                type = ExtractorLinkType.M3U8
-                            ) {
-                                this.quality = Qualities.P1080.value
-                                this.referer = fullUrl
-                            }
-                        )
-                    }
-                } catch (e: Exception) {
-                    Log.e("SportzX", "Errore estrazione link: ${e.message}")
+                if (streamUrl != null) {
+                    callback(
+                        newExtractorLink(
+                            source = this.name,
+                            name = "Server " + finalUrl.substringAfter("://").substringBefore("/"),
+                            url = streamUrl,
+                            type = ExtractorLinkType.M3U8
+                        ) {
+                            this.quality = Qualities.P1080.value
+                            this.referer = finalUrl
+                        }
+                    )
                 }
+            } catch (e: Exception) {
+                Log.e("SportzX", "Errore link $finalUrl")
             }
         }
         return true
