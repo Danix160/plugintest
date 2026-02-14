@@ -36,16 +36,11 @@ class SportzxProvider : MainAPI() {
         val doc = app.get(url, headers = headers).document
         val title = doc.selectFirst("title")?.text()?.replace(" - SportzX TV", "") ?: "Live Stream"
 
-        // Utilizziamo newLiveStreamLoadResponse come richiesto dal compilatore
-        // Firma: (name, url, apiName, dataUrl, posterUrl, type, quality, tags)
-        return newLiveStreamLoadResponse(
-            title,
-            url,
-            this.name,
-            url,
-            null,
-            TvType.Live
-        )
+        // Firma corretta: (name, url, dataUrl) { initializer }
+        return newLiveStreamLoadResponse(title, url, url) {
+            this.apiName = this@SportzxProvider.name
+            this.type = TvType.Live
+        }
     }
 
     override suspend fun loadLinks(
@@ -65,10 +60,10 @@ class SportzxProvider : MainAPI() {
                 val foundUrl = m3u8Regex.find(iframeRes)?.groupValues?.get(1)
 
                 if (foundUrl != null) {
-                    // Utilizziamo newExtractorLink come richiesto dal compilatore
-                    // Firma: (source, name, url, referer, quality, isM3u8, headers, extractorData)
+                    // Firma corretta: (source, name, url, referer, quality, isM3u8)
+                    // Alcune versioni preferiscono i parametri posizionali classici o il blocco {}
                     callback.invoke(
-                        newExtractorLink(
+                        ExtractorLink(
                             "SportzX",
                             "HD",
                             foundUrl,
