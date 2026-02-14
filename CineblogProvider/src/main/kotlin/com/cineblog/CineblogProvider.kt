@@ -54,8 +54,9 @@ class CineblogProvider : MainAPI() {
 
         var title = this.selectFirst("h2, h3, .m-title")?.text() ?: a.attr("title").ifEmpty { a.text() }
         
+        // Pulizia titolo: rimuove streaming, stagioni e punteggiatura sporca
         title = title.replace(Regex("""(?i)(\d+x\d+|Stagion[ei]\s+\d+|streaming)"""), "")
-                     .replace(Regex("""[\-\s,]+$"""), "").trim()
+                     .replace(Regex("""[\-\s,._/]+$"""), "").trim()
 
         val img = this.selectFirst("img")
         val posterUrl = fixUrlNull(img?.attr("data-src") ?: img?.attr("src"))
@@ -71,19 +72,21 @@ class CineblogProvider : MainAPI() {
     override suspend fun load(url: String): LoadResponse? {
         val doc = app.get(url).document
         
+        // --- PULIZIA TITOLO ---
         var title = doc.selectFirst("h1")?.text()?.trim() ?: return null
         title = title.replace(Regex("""(?i)(\s+\d+x\d+.*|Stagion[ei]\s+\d+.*|streaming)"""), "")
-                     .replace(Regex("""[\-\s,]+$"""), "").trim()
+                     .replace(Regex("""[\-\s,._/]+$"""), "").trim()
         
         val poster = fixUrlNull(
             doc.selectFirst("img._player-cover")?.attr("src") 
             ?: doc.selectFirst(".story-poster img, .m-img img, img[itemprop='image']")?.attr("src")
         )
 
-        // --- PULIZIA TRAMA DEFINITIVA (FILM E SERIE) ---
+        // --- PULIZIA TRAMA (FILM E SERIE) ---
         var plot = doc.selectFirst("meta[name='description']")?.attr("content")
-        plot = plot?.replace(Regex("""(?i).*?(?:streaming|treaming).*?(?:serie tv|film).*?(?:cb01|cineblog\d*01)\s*"""), "")
-                   ?.replace(Regex("""^[\s,–\-]+"""), "")?.trim()
+        plot = plot?.replace(Regex("""(?i).*?(?:streaming|treaming).*?(?:serie tv|film).*?(?:cb01|cineblog\d*01)"""), "")
+                   ?.replace(Regex("""^[\s,.:;–\-]+"""), "") // Rimuove punteggiatura residua all'inizio
+                   ?.trim()
 
         val seasonContainer = doc.selectFirst(".tt_season")
         
