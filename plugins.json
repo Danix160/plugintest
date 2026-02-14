@@ -1,5 +1,25 @@
 [
     {
+        "iconUrl": "https://cb01uno.one/wp-content/uploads/2026/01/logo-official-uno-2026.png",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/Danix160/plugintest",
+        "fileSize": 12898,
+        "status": 1,
+        "language": "it",
+        "authors": [
+            "Danix"
+        ],
+        "tvTypes": [
+            "Movie",
+            "TvSeries"
+        ],
+        "version": 1,
+        "internalName": "CbProvider",
+        "description": "cb01uno.one",
+        "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/CbProvider.cs3",
+        "name": "CbProvider"
+    },
+    {
         "iconUrl": "https://cineblog001.club/templates/CB01/img/logo.png",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/Danix160/plugintest",
