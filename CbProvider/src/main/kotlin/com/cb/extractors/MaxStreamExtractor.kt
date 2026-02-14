@@ -5,7 +5,7 @@ import com.lagradost.cloudstream3.utils.ExtractorApi
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.SubtitleFile
-import com.lagradost.cloudstream3.utils.newExtractorLink
+import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import android.util.Log
 
 class MaxStreamExtractor : ExtractorApi() {
@@ -30,14 +30,15 @@ class MaxStreamExtractor : ExtractorApi() {
                 val videoUrl = Regex("""https://maxsa\d+\.website/watchfree/[^"']+""").find(finalPage)?.value
 
                 if (videoUrl != null) {
+                    // Usiamo il costruttore diretto di ExtractorLink per evitare problemi con newExtractorLink
                     callback.invoke(
-                        newExtractorLink(
+                        ExtractorLink(
                             source = this.name,
                             name = this.name,
                             url = videoUrl,
-                            referer = continueUrl, // Passato come argomento
-                            quality = Qualities.P1080.value, // Passato come argomento
-                            isM3u8 = videoUrl.contains(".m3u8") // Passato come argomento
+                            referer = continueUrl,
+                            quality = Qualities.P1080.value,
+                            type = if (videoUrl.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
                         )
                     )
                 }
