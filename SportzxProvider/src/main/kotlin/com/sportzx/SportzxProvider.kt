@@ -18,42 +18,40 @@ class SportzxProvider : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
-        // Usiamo l'endpoint specifico per gli eventi live visto nei tuoi file
+        // Carichiamo la pagina sportzx-live che contiene la griglia vsc-grid
         val doc = app.get("$mainUrl/sportzx-live/", headers = headers).document
         val items = mutableListOf<SearchResponse>()
 
-        // Selettore aggiornato basato sull'HTML reale del sito (elementor-heading-title)
-        doc.select("h3.elementor-heading-title a, .elementor-widget-container h3 a").forEach { 
-            val title = it.text().trim()
-            val href = it.attr("href")
-            if (title.isNotEmpty() && href.isNotEmpty()) {
+        // Basato sull'HTML reale del tuo file home.txt
+        doc.select("div.vsc-card").forEach { card ->
+            val teams = card.select("div.vsc-team-name").map { it.text().trim() }
+            val time = card.selectFirst("div.vsc-time")?.text()?.trim() ?: ""
+            val league = card.selectFirst("span.vsc-league-text")?.text()?.trim() ?: ""
+            
+            // Costruiamo un titolo leggibile: "10:30 - TeamA VS TeamB (League)"
+            val title = if (teams.size >= 2) {
+                "$time ${teams[0]} VS ${teams[1]} ($league)"
+            } else if (teams.size == 1) {
+                "$time ${teams[0]} ($league)"
+            } else {
+                league
+            }
+
+            if (title.isNotEmpty()) {
                 items.add(newLiveSearchResponse(
                     title,
-                    href,
+                    "$mainUrl/en-vivo/", // Le card sembrano puntare tutte alla pagina del player
                     TvType.Live
                 ))
             }
         }
         
-        // Se la lista è vuota, proviamo un selettore più generico per i titoli
-        if (items.isEmpty()) {
-            doc.select("h3").forEach {
-                val title = it.text().trim()
-                if (title.contains("vs", ignoreCase = true) || title.contains("Live", ignoreCase = true)) {
-                    items.add(newLiveSearchResponse(title, "$mainUrl/en-vivo/", TvType.Live))
-                }
-            }
-        }
-
-        return newHomePageResponse(listOf(HomePageList("Eventi Sportivi", items)), false)
+        return newHomePageResponse(listOf(HomePageList("Eventi Live", items)), false)
     }
 
     override suspend fun load(url: String): LoadResponse {
         val doc = app.get(url, headers = headers).document
-        // Estraiamo il titolo dalla pagina o dal tag og:title
-        val title = doc.selectFirst("meta[property=og:title]")?.attr("content") 
-                    ?: doc.selectFirst("title")?.text()?.replace(" - SportzX TV", "") 
-                    ?: "Live Stream"
+        val title = doc.selectFirst("title")?.text()?.replace(" - SportzX TV", "") ?: "Live Stream"
 
         return newLiveStreamLoadResponse(title, url, url) {
             this.apiName = this@SportzxProvider.name
@@ -69,35 +67,44 @@ class SportzxProvider : MainAPI() {
     ): Boolean {
         val doc = app.get(data, headers = headers).document
         
-        // Analizziamo sia gli iframe diretti che i link nel modal (vsc-stream-link)
-        val sources = doc.select("iframe").map { it.attr("src") }.toMutableList()
-        doc.select("a.vsc-stream-link").forEach { sources.add(it.attr("href")) }
+        // Il sito usa un sistema di "modal" con link ai vari server
+        val links = mutableListOf<String>()
+        
+        // 1. Cerchiamo i link diretti dei server (dal tuo file selezione.txt)
+        doc.select("a.vsc-stream-link").forEach { links.add(it.attr("href")) }
+        
+        // 2. Cerchiamo eventuali iframe se i link sopra non ci sono
+        if (links.isEmpty()) {
+            doc.select("iframe").forEach { links.add(it.attr("src")) }
+        }
 
-        sources.distinct().forEach { src ->
-            if (src.contains("topstream") || src.contains("clonemy") || src.contains("stream") || src.contains("m3u8")) {
+        links.distinct().filter { it.isNotBlank() }.forEach { linkUrl ->
+            // Se il link è relativo, lo rendiamo assoluto
+            val fullUrl = if (linkUrl.startsWith("/")) mainUrl + linkUrl else linkUrl
+            
+            if (fullUrl.contains("topstream") || fullUrl.contains("clonemy") || fullUrl.contains("stream")) {
                 try {
-                    val res = app.get(src, referer = data, headers = headers)
-                    val iframeRes = res.text
+                    val iframeContent = app.get(fullUrl, referer = data, headers = headers).text
                     
-                    // Cerchiamo il file .m3u8 nel sorgente
+                    // Regex specifica per file m3u8
                     val m3u8Regex = Regex("""(?:file|source|src|url)\s*[:=]\s*["'](https?.*?\.m3u8.*?)["']""")
-                    val foundUrl = m3u8Regex.find(iframeRes)?.groupValues?.get(1)
+                    val foundM3u8 = m3u8Regex.find(iframeContent)?.groupValues?.get(1)
 
-                    if (foundUrl != null) {
+                    if (foundM3u8 != null) {
                         callback(
                             newExtractorLink(
                                 source = this.name,
-                                name = "Server " + (src.substringAfter("://").substringBefore(".")),
-                                url = foundUrl,
+                                name = "Server " + fullUrl.substringAfter("://").substringBefore("."),
+                                url = foundM3u8,
                                 type = ExtractorLinkType.M3U8
                             ) {
                                 this.quality = Qualities.P1080.value
-                                this.referer = src
+                                this.referer = fullUrl
                             }
                         )
                     }
                 } catch (e: Exception) {
-                    Log.e("SportzX", "Errore link $src: ${e.message}")
+                    Log.e("SportzX", "Errore estrazione link: ${e.message}")
                 }
             }
         }
