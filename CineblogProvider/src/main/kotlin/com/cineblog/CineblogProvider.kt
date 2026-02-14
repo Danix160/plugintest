@@ -53,7 +53,6 @@ class CineblogProvider : MainAPI() {
         if (href.contains("/tags/") || href.contains("/category/")) return null
 
         var title = this.selectFirst("h2, h3, .m-title")?.text() ?: a.attr("title").ifEmpty { a.text() }
-        
         title = title.replace(Regex("""(?i)(\d+x\d+|Stagion[ei]\s+\d+|streaming)"""), "")
                      .replace(Regex("""[\-\s,._/]+$"""), "").trim()
 
@@ -87,15 +86,6 @@ class CineblogProvider : MainAPI() {
                                .replace(Regex("""^[\s,.:;–\-]+"""), "")
                                .trim()
 
-        val half = cleanPlot.length / 2
-        if (half > 15) {
-            val firstHalf = cleanPlot.substring(0, half).trim()
-            val secondHalf = cleanPlot.substring(half).trim()
-            if (secondHalf.contains(firstHalf) || firstHalf.contains(secondHalf)) {
-                cleanPlot = firstHalf
-            }
-        }
-
         val seasonContainer = doc.selectFirst(".tt_season")
         
         return if (seasonContainer != null) {
@@ -106,13 +96,8 @@ class CineblogProvider : MainAPI() {
                 val seasonNum = index + 1
                 pane.select("li").forEach { li ->
                     val a = li.selectFirst("a[id^=serie-]") ?: return@forEach
-                    
-                    // Prendiamo il link principale E quelli nei mirror (come Dropload)
                     val mainLink = a.attr("data-link").ifEmpty { a.attr("href") }
                     val mirrors = li.select(".mirrors a.mr").map { it.attr("data-link") }
-                    
-                    // Uniamo i link separandoli con una virgola o un carattere speciale 
-                    // per far sì che loadLinks possa leggerli tutti
                     val allLinks = (listOf(mainLink) + mirrors).filter { it.isNotBlank() }.joinToString("|")
 
                     val dataNum = a.attr("data-num")
@@ -149,28 +134,41 @@ class CineblogProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // Separiamo i mirror che abbiamo unito nel metodo load
         val links = data.split("|")
 
         links.forEach { link ->
-            if (link.startsWith("http") && !link.contains("cineblog001") && !link.contains("mostraguarda")) {
-                loadExtractor(link, link, subtitleCallback, callback)
-            } else {
-                val doc = app.get(fixUrl(link)).document
-                val realUrl = doc.selectFirst(".open-fake-url")?.attr("data-url")
-                    ?: doc.selectFirst("iframe[src*='mostraguarda']")?.attr("src")
-                    
-                val targetDoc = if (!realUrl.isNullOrBlank()) app.get(fixUrl(realUrl)).document else doc
+            val cleanLink = fixUrl(link)
+            if (cleanLink.isBlank()) return@forEach
 
-                targetDoc.select("li[data-link], a[data-link], a.mr, iframe#_player, iframe[src*='embed']").forEach { el ->
-                    val mirror = el.attr("data-link").ifEmpty { el.attr("src") }
-                    if (mirror.isNotBlank() && !mirror.contains("mostraguarda.stream") && !mirror.contains("facebook") && !mirror.contains("google")) {
-                        loadExtractor(fixUrl(mirror), link, subtitleCallback, callback)
+            // 1. Se è un link diretto (es. mixdrop, dropload)
+            if (!cleanLink.contains("cineblog001") && !cleanLink.contains("mostraguarda") && cleanLink.startsWith("http")) {
+                loadExtractor(cleanLink, mainUrl, subtitleCallback, callback)
+            } else {
+                // 2. Cerchiamo i mirror nella pagina (Serie o Film)
+                val doc = try { app.get(cleanLink).document } catch (e: Exception) { null } ?: return@forEach
+                
+                // Selettore specifico per i mirror dei film che hai mandato
+                val mirrorElements = doc.select("._player-mirrors li, ._hidden-mirrors li, a.mr, li[data-link]")
+                
+                mirrorElements.forEach { el ->
+                    val mLink = el.attr("data-link")
+                    if (mLink.isNotBlank()) {
+                        val fixedMLink = fixUrl(mLink)
+                        
+                        if (fixedMLink.contains("mostraguarda")) {
+                            val innerDoc = try { app.get(fixedMLink).document } catch (e: Exception) { null }
+                            val finalUrl = innerDoc?.selectFirst(".open-fake-url")?.attr("data-url")
+                                ?: innerDoc?.selectFirst("iframe")?.attr("src")
+                            if (!finalUrl.isNullOrBlank()) {
+                                loadExtractor(fixUrl(finalUrl), mainUrl, subtitleCallback, callback)
+                            }
+                        } else if (!fixedMLink.contains("facebook") && !fixedMLink.contains("google")) {
+                            loadExtractor(fixedMLink, mainUrl, subtitleCallback, callback)
+                        }
                     }
                 }
             }
         }
-
         return true
     }
 }
