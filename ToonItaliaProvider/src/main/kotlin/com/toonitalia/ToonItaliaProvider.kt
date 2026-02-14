@@ -6,7 +6,6 @@ import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.MainAPI
 import com.lagradost.cloudstream3.TvType
 import org.jsoup.Jsoup
-import org.jsoup.nodes.Document
 
 class ToonItaliaProvider : MainAPI() {
     override var mainUrl = "https://toonitalia.xyz"
@@ -40,17 +39,13 @@ class ToonItaliaProvider : MainAPI() {
             .replace("luluvideo.com", "lulustream.com")
     }
 
-    // --- HOME PAGE (OTTIMIZZATA: VELOCE) ---
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = if (page <= 1) request.data else "${request.data}/page/$page/"
         val document = app.get(url, headers = commonHeaders, timeout = 10).document
         
-        // Usiamo mapNotNull: nessuna richiesta extra per ogni film
         val items = document.select("article").mapNotNull { article ->
             val titleHeader = article.selectFirst("h2.entry-title a") ?: return@mapNotNull null
             val href = titleHeader.attr("href")
-            
-            // Recupera il poster direttamente dall'HTML della home (thumbnail)
             val posterUrl = article.selectFirst("img")?.attr("src") 
                 ?: article.selectFirst("img")?.attr("data-src")
                 ?: searchPlaceholderLogo
@@ -64,18 +59,15 @@ class ToonItaliaProvider : MainAPI() {
         return newHomePageResponse(request.name, items)
     }
 
-    // --- SEARCH (DETTAGLIATA: USA AMAP) ---
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/?s=$query"
         val document = app.get(url, headers = commonHeaders).document
         
-        // amap: apre ogni risultato in parallelo per prendere il poster HQ
         return document.select("article").amap { article ->
             val titleHeader = article.selectFirst("h2.entry-title a") ?: return@amap null
             val title = titleHeader.text()
             val href = titleHeader.attr("href")
 
-            // Richiesta extra solo in ricerca per avere poster corretti
             val innerPage = app.get(href, headers = commonHeaders).document
             val posterUrl = innerPage.selectFirst("img.attachment-post-thumbnail, .post-thumbnail img, .entry-content img")?.attr("src")
                 ?: innerPage.selectFirst("meta[property=\"og:image\"]")?.attr("content")
@@ -90,7 +82,8 @@ class ToonItaliaProvider : MainAPI() {
     override suspend fun load(url: String): LoadResponse {
         val response = app.get(url, headers = commonHeaders)
         val document = response.document
-        val title = document.selectFirst("h1.entry-title")?.text()?.replace(Regex("(?i)streaming|sub\\s?ita"), "")?.trim() ?: ""
+        val title = document.selectFirst("h1.entry-title")?.text()
+            ?.replace(Regex("(?i)streaming|sub\\s?ita"), "")?.trim() ?: ""
         
         val poster = document.selectFirst("img.attachment-post-thumbnail, .post-thumbnail img, .entry-content img")?.attr("src")
             ?: searchPlaceholderLogo
@@ -98,9 +91,27 @@ class ToonItaliaProvider : MainAPI() {
         val entryContent = document.selectFirst("div.entry-content")
         val fullText = entryContent?.text() ?: ""
 
-        val plot = document.select("div.entry-content p")
-            .map { it.text() }
-            .firstOrNull { it.length > 60 && !it.contains(Regex("(?i)VOE|Lulu|Vidhide|Mixdrop|Streamtape")) }
+        // --- SOLUZIONE TRAMA ---
+        // Cerchiamo l'intestazione che contiene la parola "Trama:"
+        val tramaElement = document.selectFirst("h3:contains(Trama:), p:contains(Trama:), b:contains(Trama:)")
+        val plot = if (tramaElement != null) {
+            // Se esiste, prendiamo il testo del nodo successivo (la trama vera e propria)
+            val nextText = tramaElement.nextSibling()?.toString()?.replace(Regex("<[^>]*>"), "")?.trim()
+            if (!nextText.isNullOrBlank()) {
+                nextText
+            } else {
+                // Se il testo non è nel nodo successivo, proviamo a estrarlo dal genitore dopo la parola "Trama:"
+                tramaElement.parent()?.text()?.substringAfter("Trama:")?.trim()
+            }
+        } else {
+            // Fallback: cerca un paragrafo lungo che non contenga i metadati tecnici
+            document.select("div.entry-content p")
+                .map { it.text() }
+                .firstOrNull { 
+                    it.length > 60 && 
+                    !it.contains(Regex("(?i)Titolo originale|Paese di origine|Stato Opera|Aggiornamento")) 
+                }
+        }
 
         val duration = Regex("""(\d+)\s?min""").find(fullText)?.groupValues?.get(1)?.toIntOrNull()
         val year = Regex("""\b(19\d{2}|20[0-2]\d)\b""").find(fullText)?.groupValues?.get(1)?.toIntOrNull()
@@ -128,7 +139,7 @@ class ToonItaliaProvider : MainAPI() {
                 val matchSE = Regex("""(\d+)[×x](\d+)""").find(text)
 
                 val s = if (isTrailerRow) 0 else if (isMovieUrl) null else (matchSE?.groupValues?.get(1)?.toIntOrNull() ?: 1)
-                val e = if (isTrailerRow) 0 else if (isMovieUrl) null else absoluteEpCounter
+                val e = if (isTrailerRow) 0 else if (isMovieUrl) null else (matchSE?.groupValues?.get(2)?.toIntOrNull() ?: absoluteEpCounter)
 
                 val dataUrls = validLinks.map { it.attr("href") }.joinToString("###")
                 var epName = text.split(Regex("(?i)VOE|LuluStream|Lulu|Streaming|Vidhide|Mixdrop|RPMShare")).first().trim()
@@ -144,7 +155,7 @@ class ToonItaliaProvider : MainAPI() {
                     this.posterUrl = poster
                 })
 
-                if (!isMovieUrl && !isTrailerRow) {
+                if (!isMovieUrl && !isTrailerRow && matchSE == null) {
                     absoluteEpCounter++ 
                 }
             }
@@ -156,7 +167,7 @@ class ToonItaliaProvider : MainAPI() {
         return if (tvType == TvType.Movie) {
             newMovieLoadResponse(title, url, TvType.Movie, finalEpisodes.firstOrNull()?.data ?: "") {
                 this.posterUrl = poster
-                this.plot = plot
+                this.plot = plot?.trim()
                 this.year = year
                 this.duration = duration
                 this.posterHeaders = commonHeaders
@@ -164,7 +175,7 @@ class ToonItaliaProvider : MainAPI() {
         } else {
             newTvSeriesLoadResponse(title, url, tvType, finalEpisodes) {
                 this.posterUrl = poster
-                this.plot = plot
+                this.plot = plot?.trim()
                 this.year = year
                 this.duration = duration
                 this.posterHeaders = commonHeaders
