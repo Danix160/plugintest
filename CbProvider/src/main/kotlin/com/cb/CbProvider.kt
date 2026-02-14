@@ -6,7 +6,7 @@ import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.MainAPI
 import com.lagradost.cloudstream3.TvType
 import org.json.JSONObject
-import com.cb.extractors.MaxStreamExtractor // AGGIUNTO QUI: Importiamo l'estrattore
+import com.cb.extractors.MaxStreamExtractor
 
 class CbProvider : MainAPI() {
     override var mainUrl = "https://cb01uno.one"
@@ -67,17 +67,38 @@ class CbProvider : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val url = "$mainUrl/?s=$query"
-        val document = app.get(url, headers = commonHeaders).document
-        return document.select("div.card, div.post-video, article").mapNotNull { element ->
-            val titleElement = element.selectFirst(".card-title a, h3 a, h2 a") ?: return@mapNotNull null
-            val href = titleElement.attr("href")
-            val isSeries = href.contains("/serietv/")
-            val title = fixTitle(titleElement.text(), !isSeries)
-            newMovieSearchResponse(title, href, if (isSeries) TvType.TvSeries else TvType.Movie) {
-                this.posterUrl = element.selectFirst("img")?.attr("src")
+        val allResults = mutableListOf<SearchResponse>()
+        val maxPages = 3 // Carica fino a 3 pagine di risultati per includere serie e vecchi post
+
+        for (page in 1..maxPages) {
+            val url = if (page == 1) "$mainUrl/?s=$query" else "$mainUrl/page/$page/?s=$query"
+            val response = try { app.get(url, headers = commonHeaders) } catch (e: Exception) { null }
+            val document = response?.document ?: break
+            
+            val items = document.select("div.card, div.post-video, article, div.mp-post")
+            if (items.isEmpty()) break
+
+            items.forEach { element ->
+                val titleElement = element.selectFirst(".card-title a, h3 a, h2 a, .post-title a") ?: return@forEach
+                val href = titleElement.attr("href")
+                if (href.contains("/tag/") || href.contains("/category/")) return@forEach
+                
+                // Rilevamento potenziato Serie TV
+                val isSeries = href.contains("/serietv/") || element.text().contains("Serie TV", ignoreCase = true)
+                val title = fixTitle(titleElement.text(), !isSeries)
+                
+                val posterUrl = element.selectFirst("img")?.let { img ->
+                    img.attr("data-lazy-src").ifBlank { 
+                        img.attr("data-src").ifBlank { img.attr("src") } 
+                    }
+                }
+
+                allResults.add(newMovieSearchResponse(title, href, if (isSeries) TvType.TvSeries else TvType.Movie) {
+                    this.posterUrl = posterUrl
+                })
             }
-        }.distinctBy { it.url }
+        }
+        return allResults.distinctBy { it.url }
     }
 
     override suspend fun load(url: String): LoadResponse {
@@ -86,7 +107,7 @@ class CbProvider : MainAPI() {
         
         val title = fixTitle(document.selectFirst("h1")?.text() ?: "", !isSeries)
         val poster = document.selectFirst("meta[property=\"og:image\"]")?.attr("content")
-        val plot = document.select("div.ignore-css p").firstOrNull { it.text().length > 50 }?.text()
+        val plot = document.select("div.ignore-css p, .entry-content p").firstOrNull { it.text().length > 50 }?.text()
                   ?.substringBefore("+Info")?.trim()
         val year = Regex("\\d{4}").find(document.selectFirst("h1")?.text() ?: "")?.value?.toIntOrNull()
 
@@ -94,8 +115,8 @@ class CbProvider : MainAPI() {
 
         if (!isSeries) {
             val linkList = mutableSetOf<String>()
-            
-            document.select("div[data-src], div[data-link], li[data-src], iframe, table a, a.buttona_stream").forEach { el ->
+            // Selettore espanso per trovare link nei vari formati di CB01
+            document.select("div[data-src], div[data-link], li[data-src], iframe, table a, a.buttona_stream, .stream-link").forEach { el ->
                 val link = el.attr("data-src").ifBlank { 
                     el.attr("data-link").ifBlank { 
                         el.attr("src").ifBlank { el.attr("href") } 
@@ -111,9 +132,10 @@ class CbProvider : MainAPI() {
                 episodes.add(newEpisode(finalLinks.joinToString("###")) { this.name = "Film - Streaming" })
             }
         } else {
+            // Parsing Serie TV: Gestione stagioni (sp-wrap è il contenitore classico delle tabelle)
             document.select("div.sp-wrap").forEachIndexed { index, wrap ->
                 val seasonNum = index + 1
-                wrap.select(".sp-body p, .sp-body li").forEach { row ->
+                wrap.select(".sp-body p, .sp-body li, tr").forEach { row ->
                     val links = row.select("a").filter { a -> 
                         val h = a.attr("href")
                         supportedHosts.any { host -> h.contains(host) } || h.contains("stayonline")
@@ -153,7 +175,7 @@ class CbProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         data.split("###").forEach { rawLink ->
-            // AGGIUNTO QUI: Gestione speciale per MaxStream che usa il nuovo estrattore
+            // Priorità al tuo MaxStreamExtractor per i link uprot con msf
             if (rawLink.contains("uprot.net") && rawLink.contains("msf")) {
                 MaxStreamExtractor().getUrl(rawLink, mainUrl, subtitleCallback, callback)
             } 
@@ -168,8 +190,8 @@ class CbProvider : MainAPI() {
                 }
 
                 finalUrl?.let { l ->
-                    // Evitiamo di ricaricare uprot se è già stato gestito sopra
-                    if (l.startsWith("http") && !l.contains("uprot.net")) {
+                    // Evitiamo loop infiniti su uprot se il bypass fallisce
+                    if (l.startsWith("http") && !l.contains("uprot.net") && !l.contains("swzz.xyz")) {
                         loadExtractor(l, subtitleCallback, callback)
                     }
                 }
