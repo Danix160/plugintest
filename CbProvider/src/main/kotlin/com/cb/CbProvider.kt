@@ -66,31 +66,37 @@ class CbProvider : MainAPI() {
         return newHomePageResponse(request.name, items)
     }
 
+    // --- RICERCA UNIFICATA (FILM + SERIE TV) ---
     override suspend fun search(query: String): List<SearchResponse> {
         val allResults = mutableListOf<SearchResponse>()
-        val maxPages = 5 // Aumentato per trovare serie TV raggruppate in pagine successive
+        val maxPages = 5 
 
         for (page in 1..maxPages) {
+            // Usiamo l'URL di ricerca globale per trovare tutto
             val url = if (page == 1) "$mainUrl/?s=$query" else "$mainUrl/page/$page/?s=$query"
             val response = try { app.get(url, headers = commonHeaders) } catch (e: Exception) { null }
             val document = response?.document ?: break
             
-            // Selettore espanso per ogni possibile contenitore di post
+            // Selettore per ogni tipo di risultato (card, articoli, liste)
             val items = document.select("div.card, div.post-video, article, div.mp-post, div.post, li.item-list")
             if (items.isEmpty()) break
 
             items.forEach { element ->
                 val titleElement = element.selectFirst("h2 a, h3 a, .card-title a, .post-title a, a[title]") ?: return@forEach
                 val href = titleElement.attr("href")
-                if (href.contains("/tag/") || href.contains("/category/")) return@forEach
+                
+                // Salta i link non validi
+                if (href.contains("/tag/") || href.contains("/category/") || href.length < 15) return@forEach
                 
                 val rawTitle = titleElement.text()
-                // Riconoscimento Serie TV avanzato: URL o Keyword nel titolo/testo
+
+                // LOGICA DI UNIFICAZIONE:
+                // Se l'URL contiene "serietv" o "serie", Cloudstream lo tratterà come Serie TV
+                // Altrimenti come Film. Questo permette di averli mischiati nella ricerca.
                 val isSeries = href.contains("/serietv/") || 
                                href.contains("/serie/") ||
                                element.text().contains("Serie TV", ignoreCase = true) ||
-                               rawTitle.contains("Stagione", ignoreCase = true) ||
-                               rawTitle.contains("Serie", ignoreCase = true)
+                               rawTitle.contains(Regex("(?i)Stagion|Episodio|Serie"))
 
                 val title = fixTitle(rawTitle, !isSeries)
                 
@@ -110,7 +116,8 @@ class CbProvider : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse {
         val document = app.get(url, headers = commonHeaders).document
-        val isSeries = url.contains("/serietv/") || url.contains("/serie/")
+        // Molto importante: riconosciamo se è una serie anche in fase di caricamento
+        val isSeries = url.contains("/serietv/") || url.contains("/serie/") || document.select(".category").text().contains("Serie TV", true)
         
         val title = fixTitle(document.selectFirst("h1")?.text() ?: "", !isSeries)
         val poster = document.selectFirst("meta[property=\"og:image\"]")?.attr("content")
@@ -138,8 +145,8 @@ class CbProvider : MainAPI() {
                 episodes.add(newEpisode(finalLinks.joinToString("###")) { this.name = "Film - Streaming" })
             }
         } else {
-            // Selettore stagioni: gestisce sia il formato sp-wrap che le tabelle standard
-            document.select("div.sp-wrap, .entry-content table").forEachIndexed { index, wrap ->
+            // Parsing Episodi e Stagioni
+            document.select("div.sp-wrap, .entry-content table, .serie-tv-table").forEachIndexed { index, wrap ->
                 val seasonNum = index + 1
                 wrap.select(".sp-body p, .sp-body li, tr").forEach { row ->
                     val links = row.select("a").filter { a -> 
