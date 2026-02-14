@@ -3,7 +3,7 @@
         "iconUrl": "https://cineblog001.club/templates/CB01/img/logo.png",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/Danix160/plugintest",
-        "fileSize": 14372,
+        "fileSize": 14521,
         "status": 1,
         "language": "it",
         "authors": [
@@ -13,7 +13,7 @@
             "Movie",
             "TvSeries"
         ],
-        "version": 55,
+        "version": 56,
         "internalName": "CineblogProvider",
         "description": "cineblog001.club",
         "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/CineblogProvider.cs3",
@@ -34,7 +34,7 @@
             "Anime",
             "Cartoon"
         ],
-        "version": 41,
+        "version": 42,
         "internalName": "ToonItaliaProvider",
         "description": "Archivio di Anime e Cartoni animati in italiano da ToonItalia.xyz",
         "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/ToonItaliaProvider.cs3",
