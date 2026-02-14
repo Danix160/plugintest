@@ -14,11 +14,6 @@ class CbProvider : MainAPI() {
     override var lang = "it"
     override val hasMainPage = true
 
-    override val mainPage = mainPageOf(
-        mainUrl to "Film",
-        "$mainUrl/serietv" to "Serie TV"
-    )
-
     private val commonHeaders = mapOf(
         "Referer" to "$mainUrl/",
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
@@ -33,7 +28,6 @@ class CbProvider : MainAPI() {
     override val mainPage = mainPageOf(
         "$mainUrl/" to "Ultimi Film",
         "$mainUrl/serietv/" to "Ultime Serie TV",
-        "$mainUrl/category/film-streaming-hd/" to "Film HD",
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
