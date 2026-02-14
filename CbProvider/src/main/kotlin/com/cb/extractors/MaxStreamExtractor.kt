@@ -30,15 +30,16 @@ class MaxStreamExtractor : ExtractorApi() {
                 val videoUrl = Regex("""https://maxsa\d+\.website/watchfree/[^"']+""").find(finalPage)?.value
 
                 if (videoUrl != null) {
-                    // Usiamo il costruttore diretto di ExtractorLink per evitare problemi con newExtractorLink
+                    val isM3u = videoUrl.contains(".m3u8")
+                    
                     callback.invoke(
                         ExtractorLink(
-                            source = this.name,
-                            name = this.name,
-                            url = videoUrl,
-                            referer = continueUrl,
-                            quality = Qualities.P1080.value,
-                            type = if (videoUrl.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                            this.name,         // source
+                            this.name,         // name
+                            videoUrl,          // url
+                            continueUrl,       // referer
+                            Qualities.P1080.value, // quality
+                            isM3u              // isM3u8
                         )
                     )
                 }
