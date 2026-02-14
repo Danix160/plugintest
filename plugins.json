@@ -40,6 +40,25 @@
         "name": "CineblogProvider"
     },
     {
+        "iconUrl": "https://sportzx.cc/wp-content/uploads/2025/10/sportzx.webp",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/Danix160/plugintest",
+        "fileSize": 8580,
+        "status": 1,
+        "language": "it",
+        "authors": [
+            "Danix"
+        ],
+        "tvTypes": [
+            "Live"
+        ],
+        "version": 17,
+        "internalName": "SportzxProvider",
+        "description": "cb01uno.one",
+        "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/SportzxProvider.cs3",
+        "name": "SportzxProvider"
+    },
+    {
         "iconUrl": "https://toonitalia.xyz/wp-content/uploads/2023/08/cropped-Majintoon-192x192.jpg",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/Danix160/plugintest",
