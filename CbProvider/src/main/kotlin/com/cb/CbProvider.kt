@@ -44,12 +44,12 @@ class CbProvider : MainAPI() {
         val url = if (page <= 1) request.data else "${request.data.removeSuffix("/")}/page/$page/"
         val document = app.get(url, headers = commonHeaders).document
         
-        val items = document.select("div.card.mp-post, div.post-video, article.post").mapNotNull { element ->
-            val titleElement = element.selectFirst(".card-title a, h3 a, h2 a") ?: return@mapNotNull null
+        val items = document.select("div.card.mp-post, div.post-video, article.post, div.mp-post").mapNotNull { element ->
+            val titleElement = element.selectFirst(".card-title a, h3 a, h2 a, .post-title a") ?: return@mapNotNull null
             val href = titleElement.attr("href")
             if (href.contains("/tag/") || href.contains("/category/") || href.length < 10) return@mapNotNull null
 
-            val isSeries = href.contains("/serietv/") || request.data.contains("serietv")
+            val isSeries = href.contains("/serietv/") || href.contains("/serie/") || request.data.contains("serietv")
             val title = fixTitle(titleElement.text(), !isSeries)
             
             val posterUrl = element.selectFirst(".card-image img, img")?.let { img ->
@@ -68,24 +68,31 @@ class CbProvider : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse> {
         val allResults = mutableListOf<SearchResponse>()
-        val maxPages = 3 // Carica fino a 3 pagine di risultati per includere serie e vecchi post
+        val maxPages = 5 // Aumentato per trovare serie TV raggruppate in pagine successive
 
         for (page in 1..maxPages) {
             val url = if (page == 1) "$mainUrl/?s=$query" else "$mainUrl/page/$page/?s=$query"
             val response = try { app.get(url, headers = commonHeaders) } catch (e: Exception) { null }
             val document = response?.document ?: break
             
-            val items = document.select("div.card, div.post-video, article, div.mp-post")
+            // Selettore espanso per ogni possibile contenitore di post
+            val items = document.select("div.card, div.post-video, article, div.mp-post, div.post, li.item-list")
             if (items.isEmpty()) break
 
             items.forEach { element ->
-                val titleElement = element.selectFirst(".card-title a, h3 a, h2 a, .post-title a") ?: return@forEach
+                val titleElement = element.selectFirst("h2 a, h3 a, .card-title a, .post-title a, a[title]") ?: return@forEach
                 val href = titleElement.attr("href")
                 if (href.contains("/tag/") || href.contains("/category/")) return@forEach
                 
-                // Rilevamento potenziato Serie TV
-                val isSeries = href.contains("/serietv/") || element.text().contains("Serie TV", ignoreCase = true)
-                val title = fixTitle(titleElement.text(), !isSeries)
+                val rawTitle = titleElement.text()
+                // Riconoscimento Serie TV avanzato: URL o Keyword nel titolo/testo
+                val isSeries = href.contains("/serietv/") || 
+                               href.contains("/serie/") ||
+                               element.text().contains("Serie TV", ignoreCase = true) ||
+                               rawTitle.contains("Stagione", ignoreCase = true) ||
+                               rawTitle.contains("Serie", ignoreCase = true)
+
+                val title = fixTitle(rawTitle, !isSeries)
                 
                 val posterUrl = element.selectFirst("img")?.let { img ->
                     img.attr("data-lazy-src").ifBlank { 
@@ -103,11 +110,11 @@ class CbProvider : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse {
         val document = app.get(url, headers = commonHeaders).document
-        val isSeries = url.contains("/serietv/")
+        val isSeries = url.contains("/serietv/") || url.contains("/serie/")
         
         val title = fixTitle(document.selectFirst("h1")?.text() ?: "", !isSeries)
         val poster = document.selectFirst("meta[property=\"og:image\"]")?.attr("content")
-        val plot = document.select("div.ignore-css p, .entry-content p").firstOrNull { it.text().length > 50 }?.text()
+        val plot = document.select("div.ignore-css p, .entry-content p, .post-content p").firstOrNull { it.text().length > 50 }?.text()
                   ?.substringBefore("+Info")?.trim()
         val year = Regex("\\d{4}").find(document.selectFirst("h1")?.text() ?: "")?.value?.toIntOrNull()
 
@@ -115,7 +122,6 @@ class CbProvider : MainAPI() {
 
         if (!isSeries) {
             val linkList = mutableSetOf<String>()
-            // Selettore espanso per trovare link nei vari formati di CB01
             document.select("div[data-src], div[data-link], li[data-src], iframe, table a, a.buttona_stream, .stream-link").forEach { el ->
                 val link = el.attr("data-src").ifBlank { 
                     el.attr("data-link").ifBlank { 
@@ -132,8 +138,8 @@ class CbProvider : MainAPI() {
                 episodes.add(newEpisode(finalLinks.joinToString("###")) { this.name = "Film - Streaming" })
             }
         } else {
-            // Parsing Serie TV: Gestione stagioni (sp-wrap è il contenitore classico delle tabelle)
-            document.select("div.sp-wrap").forEachIndexed { index, wrap ->
+            // Selettore stagioni: gestisce sia il formato sp-wrap che le tabelle standard
+            document.select("div.sp-wrap, .entry-content table").forEachIndexed { index, wrap ->
                 val seasonNum = index + 1
                 wrap.select(".sp-body p, .sp-body li, tr").forEach { row ->
                     val links = row.select("a").filter { a -> 
@@ -144,7 +150,7 @@ class CbProvider : MainAPI() {
                         val text = row.text()
                         val epNum = Regex("(?i)episodio\\s?(\\d+)").find(text)?.groupValues?.get(1)?.toIntOrNull()
                         episodes.add(newEpisode(links.joinToString("###") { it.attr("href") }) {
-                            this.name = text.split("-").first().trim()
+                            this.name = if (text.contains("-")) text.split("-").first().trim() else "Episodio $epNum"
                             this.season = seasonNum
                             this.episode = epNum
                         })
@@ -175,7 +181,6 @@ class CbProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         data.split("###").forEach { rawLink ->
-            // Priorità al tuo MaxStreamExtractor per i link uprot con msf
             if (rawLink.contains("uprot.net") && rawLink.contains("msf")) {
                 MaxStreamExtractor().getUrl(rawLink, mainUrl, subtitleCallback, callback)
             } 
@@ -185,13 +190,12 @@ class CbProvider : MainAPI() {
                 if (rawLink.contains("stayonline.pro")) {
                     finalUrl = bypassStayOnline(rawLink)
                 } 
-                else if (rawLink.contains("uprot.net") || rawLink.contains("swzz.xyz")) {
+                else if (rawLink.contains("uprot.net") || rawLink.contains("swzz.xyz") || rawLink.contains("maxsa")) {
                     finalUrl = bypassShortener(rawLink)
                 }
 
                 finalUrl?.let { l ->
-                    // Evitiamo loop infiniti su uprot se il bypass fallisce
-                    if (l.startsWith("http") && !l.contains("uprot.net") && !l.contains("swzz.xyz")) {
+                    if (l.startsWith("http") && !l.contains("uprot.net") && !l.contains("swzz.xyz") && !l.contains("maxsa")) {
                         loadExtractor(l, subtitleCallback, callback)
                     }
                 }
