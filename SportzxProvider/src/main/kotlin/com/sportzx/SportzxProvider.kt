@@ -2,7 +2,6 @@ package com.sportzx
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import org.jsoup.nodes.Element
 
 class SportzxProvider : MainAPI() {
     override var mainUrl = "https://sportzx.cc"
@@ -37,12 +36,15 @@ class SportzxProvider : MainAPI() {
         val doc = app.get(url, headers = headers).document
         val title = doc.selectFirst("title")?.text()?.replace(" - SportzX TV", "") ?: "Live Stream"
 
-        // Correzione Type Mismatch: l'ordine dei parametri per newLiveStreamLoadResponse è fondamentale
-        return newLiveStreamLoadResponse(
-            name = title,
-            url = url,
-            type = TvType.Live,
-            dataUrl = url
+        // Usiamo il metodo più generico per evitare errori sui parametri nominati
+        return LiveStreamLoadResponse(
+            title,
+            url,
+            this.name,
+            url,
+            null,
+            null,
+            null
         )
     }
 
@@ -63,15 +65,15 @@ class SportzxProvider : MainAPI() {
                 val foundUrl = m3u8Regex.find(iframeRes)?.groupValues?.get(1)
 
                 if (foundUrl != null) {
-                    // Uso di newExtractorLink con parametri nominati per la massima sicurezza
+                    // Costruttore diretto di ExtractorLink (Source, Name, URL, Referer, Quality, isM3u8)
                     callback.invoke(
-                        newExtractorLink(
-                            source = "SportzX",
-                            name = "HD Stream",
-                            url = foundUrl,
-                            referer = src,
-                            quality = Qualities.P1080.value,
-                            isM3u8 = true
+                        ExtractorLink(
+                            "SportzX",
+                            "HD",
+                            foundUrl,
+                            src,
+                            Qualities.P1080.value,
+                            true
                         )
                     )
                 }
