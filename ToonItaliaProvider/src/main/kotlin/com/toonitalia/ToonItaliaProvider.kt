@@ -91,7 +91,7 @@ class ToonItaliaProvider : MainAPI() {
         val entryContent = document.selectFirst("div.entry-content")
         val fullText = entryContent?.text() ?: ""
 
-        // --- SOLUZIONE TRAMA CON TAGLIO FONTE ---
+        // --- SOLUZIONE TRAMA MIGLIORATA CON BLOCCO "LINK" ---
         val tramaElement = document.selectFirst("h3:contains(Trama:), p:contains(Trama:), b:contains(Trama:)")
         var plot = if (tramaElement != null) {
             val nextText = tramaElement.nextSibling()?.toString()?.replace(Regex("<[^>]*>"), "")?.trim()
@@ -109,9 +109,11 @@ class ToonItaliaProvider : MainAPI() {
                 }
         }
 
-        // Taglia la trama se contiene "Fonte:" o "Animeclick"
-        plot = plot?.split(Regex("(?i)Fonte:"), 2)?.first()?.trim()
-        plot = plot?.split(Regex("(?i)Animeclick"), 2)?.first()?.trim()
+        // Pulizia stringhe di chiusura (Fonte, Animeclick, Link)
+        val stopWords = listOf("(?i)Fonte:", "(?i)Animeclick", "(?i)\\bLink\\b")
+        stopWords.forEach { word ->
+            plot = plot?.split(Regex(word), 2)?.first()?.trim()
+        }
 
         val duration = Regex("""(\d+)\s?min""").find(fullText)?.groupValues?.get(1)?.toIntOrNull()
         val year = Regex("""\b(19\d{2}|20[0-2]\d)\b""").find(fullText)?.groupValues?.get(1)?.toIntOrNull()
