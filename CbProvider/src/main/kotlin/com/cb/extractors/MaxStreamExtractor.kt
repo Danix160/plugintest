@@ -44,15 +44,16 @@ class MaxStreamExtractor : ExtractorApi() {
 
                 if (videoUrl.isNotEmpty()) {
                     callback.invoke(
-                        newExtractorLink(
-                            this.name,               // source
-                            this.name,               // name
-                            videoUrl,                // url
-                            url,                     // referer
-                            Qualities.Unknown.value, // quality
-                            videoUrl.contains(".m3u8") // isM3u8
-                        )
-                    )
+            newExtractorLink(
+                source = name,
+                name = name,
+                url = src,
+                type = ExtractorLinkType.M3U8
+            ) {
+                this.referer = referer ?: ""
+                this.quality = Qualities.Unknown.value
+            }
+        )
                 }
             } else {
                 Log.d("MaxStream", "Script packed non trovato nella pagina")
