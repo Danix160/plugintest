@@ -2,7 +2,6 @@ package com.cb
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import org.json.JSONObject
 import org.jsoup.nodes.Element
 
@@ -130,28 +129,23 @@ class CbProvider : MainAPI() {
                     cleanLink.replace("msf/", "embed-") + ".html"
                 } else cleanLink
 
-                // Invece di chiamare MaxStreamExtractor() che fallisce, 
-                // usiamo loadExtractor che gestisce l'istanza internamente
                 if (!loadExtractor(embedUrl, subtitleCallback, callback)) {
-                    // Fallback manuale se l'estrattore non lo prende
                     bypassMaxStreamManual(embedUrl)?.let { directUrl ->
+                        // Usiamo il costruttore base senza nomi parametri per evitare conflitti di versione
                         callback.invoke(
-                            newExtractorLink(
-                                name = "MaxStream Direct",
-                                source = "MaxStream",
-                                url = directUrl,
-                                referer = embedUrl,
-                                quality = Qualities.P720.value,
-                                isM3u8 = directUrl.contains(".m3u8")
+                            ExtractorLink(
+                                "MaxStream",
+                                "MaxStream",
+                                directUrl,
+                                embedUrl,
+                                Qualities.P720.value,
+                                directUrl.contains(".m3u8")
                             )
                         )
                     }
                 }
             } else {
-                val finalUrl = when {
-                    cleanLink.contains("stayonline.pro") -> bypassStayOnline(cleanLink)
-                    else -> cleanLink
-                }
+                val finalUrl = if (cleanLink.contains("stayonline.pro")) bypassStayOnline(cleanLink) else cleanLink
                 finalUrl?.let { loadExtractor(it, subtitleCallback, callback) }
             }
         }
@@ -164,18 +158,4 @@ class CbProvider : MainAPI() {
             val html = res.text
             Regex("""file:\s*["'](http[^"']+)["']""").find(html)?.groupValues?.get(1)
                 ?: res.document.selectFirst("iframe")?.attr("src")
-        } catch (e: Exception) { null }
-    }
-
-    private suspend fun bypassStayOnline(link: String): String? {
-        return try {
-            val id = link.split("/").last { it.isNotBlank() }
-            val response = app.post(
-                "https://stayonline.pro/ajax/linkEmbedView.php",
-                headers = mapOf("X-Requested-With" to "XMLHttpRequest", "Referer" to link),
-                data = mapOf("id" to id)
-            ).text
-            JSONObject(response).getJSONObject("data").getString("value")
-        } catch (e: Exception) { null }
-    }
-}
+        } catch (e: Exception) {
