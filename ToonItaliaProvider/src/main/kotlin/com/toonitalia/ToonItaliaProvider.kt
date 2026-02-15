@@ -1,4 +1,3 @@
-
 package com.toonitalia
 
 import com.lagradost.cloudstream3.*
@@ -23,7 +22,7 @@ class ToonItaliaProvider : MainAPI() {
     )
 
     private val supportedHosts = listOf(
-        "voe", "chuckle-tube", "luluvdo", "lulustream", "vidhide", "rpmshare",
+        "voe", "chuckle-tube", "luluvdo", "lulustream", "vidhide", "rpmshare", "rpmplay",
         "mixdrop", "streamtape", "fastream", "filemoon", "wolfstream", "streamwish"
     )
 
@@ -92,15 +91,16 @@ class ToonItaliaProvider : MainAPI() {
         val entryContent = document.selectFirst("div.entry-content")
         val fullText = entryContent?.text() ?: ""
 
-        // --- SOLUZIONE TRAMA MIGLIORATA CON BLOCCO "LINK" ---
+        // --- RICONOSCIMENTO TIPO (FILM VS SERIE) TRAMITE CATEGORIE ---
+        val categories = document.select(".entry-categories-inner a").map { it.text().lowercase() }
+        val isMovie = categories.any { it.contains("film animazione") || it == "film" }
+        val tvType = if (isMovie) TvType.Movie else TvType.TvSeries
+
+        // --- SOLUZIONE TRAMA ---
         val tramaElement = document.selectFirst("h3:contains(Trama:), p:contains(Trama:), b:contains(Trama:)")
         var plot = if (tramaElement != null) {
             val nextText = tramaElement.nextSibling()?.toString()?.replace(Regex("<[^>]*>"), "")?.trim()
-            if (!nextText.isNullOrBlank()) {
-                nextText
-            } else {
-                tramaElement.parent()?.text()?.substringAfter("Trama:")?.trim()
-            }
+            if (!nextText.isNullOrBlank()) nextText else tramaElement.parent()?.text()?.substringAfter("Trama:")?.trim()
         } else {
             document.select("div.entry-content p")
                 .map { it.text() }
@@ -110,18 +110,16 @@ class ToonItaliaProvider : MainAPI() {
                 }
         }
 
-        // Pulizia stringhe di chiusura (Fonte, Animeclick, Link)
+        // Pulizia stringhe di chiusura
         val stopWords = listOf("(?i)Fonte:", "(?i)Animeclick", "(?i)\\bLink\\b")
-        stopWords.forEach { word ->
-            plot = plot?.split(Regex(word), 2)?.first()?.trim()
-        }
+        stopWords.forEach { word -> plot = plot?.split(Regex(word), 2)?.first()?.trim() }
 
         val duration = Regex("""(\d+)\s?min""").find(fullText)?.groupValues?.get(1)?.toIntOrNull()
         val year = Regex("""\b(19\d{2}|20[0-2]\d)\b""").find(fullText)?.groupValues?.get(1)?.toIntOrNull()
 
         val episodes = mutableListOf<Episode>()
-        val isMovieUrl = url.contains("film") || url.contains("film-animazione")
         
+        // --- ESTRAZIONE EPISODI CON MULTI-MIRROR ---
         val lines = entryContent?.html()?.split(Regex("<br\\s*/?>|</p>|</div>|<li>|\\n")) ?: listOf()
         var absoluteEpCounter = 1
 
@@ -129,26 +127,27 @@ class ToonItaliaProvider : MainAPI() {
             val docLine = Jsoup.parseBodyFragment(line)
             val text = docLine.text().trim()
             
+            // Trova tutti i mirror nella riga (es. VOE e RPMShare)
             val validLinks = docLine.select("a").filter { a -> 
                 val href = a.attr("href")
-                val linkText = a.text().lowercase()
                 href.startsWith("http") && 
                 !href.contains("toonitalia.xyz") && 
-                supportedHosts.any { host -> href.contains(host) || linkText.contains(host) }
-            }
+                supportedHosts.any { host -> href.contains(host) }
+            }.map { it.attr("href") }.distinct()
 
             if (validLinks.isNotEmpty()) {
                 val isTrailerRow = text.contains(Regex("(?i)sigla|intro|trailer"))
                 val matchSE = Regex("""(\d+)[×x](\d+)""").find(text)
 
-                val s = if (isTrailerRow) 0 else if (isMovieUrl) null else (matchSE?.groupValues?.get(1)?.toIntOrNull() ?: 1)
-                val e = if (isTrailerRow) 0 else if (isMovieUrl) null else (matchSE?.groupValues?.get(2)?.toIntOrNull() ?: absoluteEpCounter)
+                val s = if (isTrailerRow) 0 else if (isMovie) null else (matchSE?.groupValues?.get(1)?.toIntOrNull() ?: 1)
+                val e = if (isTrailerRow) 0 else if (isMovie) null else (matchSE?.groupValues?.get(2)?.toIntOrNull() ?: absoluteEpCounter)
 
-                val dataUrls = validLinks.map { it.attr("href") }.joinToString("###")
-                var epName = text.split(Regex("(?i)VOE|LuluStream|Lulu|Streaming|Vidhide|Mixdrop|RPMShare")).first().trim()
+                // Uniamo i mirror con ### per gestirli in loadLinks
+                val dataUrls = validLinks.joinToString("###")
                 
+                var epName = text.split(Regex("(?i)VOE|Lulu|Streaming|Vidhide|Mixdrop|RPMShare|Link| -")).first().trim()
                 if (epName.isEmpty() || epName.length < 2) {
-                    epName = if (isMovieUrl) "Film" else "Episodio $absoluteEpCounter"
+                    epName = if (isMovie) "Film" else "Episodio $absoluteEpCounter"
                 }
 
                 episodes.add(newEpisode(dataUrls) {
@@ -158,13 +157,10 @@ class ToonItaliaProvider : MainAPI() {
                     this.posterUrl = poster
                 })
 
-                if (!isMovieUrl && !isTrailerRow && matchSE == null) {
-                    absoluteEpCounter++ 
-                }
+                if (!isMovie && !isTrailerRow && matchSE == null) absoluteEpCounter++ 
             }
         }
 
-        val tvType = if (isMovieUrl) TvType.Movie else TvType.TvSeries
         val finalEpisodes = episodes.sortedWith(compareBy({ it.season ?: 0 }, { it.episode ?: 0 }))
 
         return if (tvType == TvType.Movie) {
