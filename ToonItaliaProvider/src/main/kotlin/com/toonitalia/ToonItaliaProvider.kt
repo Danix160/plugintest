@@ -37,7 +37,7 @@ class ToonItaliaProvider : MainAPI() {
             .replace("chuckle-tube.com", "voe.sx")
             .replace("luluvdo.com", "lulustream.com")
             .replace("luluvideo.com", "lulustream.com")
-            .replace("toonitalia.rpmplay.xyz/#", "rpmplay.xyz")
+            .replace("toonitalia.rpmplay.xyz/", "rpmplay.xyz")
             .replace("luluvdo.com", "lulustream.com")
             // Streamup usa la stessa struttura di StreamWish
             .replace("streamup.ws", "streamwish.to")
