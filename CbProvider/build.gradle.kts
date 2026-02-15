@@ -16,7 +16,7 @@ cloudstream {
     authors = listOf("Danix")
     
     status = 1
-    tvTypes = listOf("Movie", "TvSeries")
+    tvTypes = listOf("Movie", "TvSeries", "Cartoon")
     requiresResources = false
     language = "it"
     iconUrl = "https://cb01uno.one/wp-content/uploads/2026/01/logo-official-uno-2026.png"
