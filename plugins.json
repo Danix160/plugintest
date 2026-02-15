@@ -55,7 +55,7 @@
             "Anime",
             "Cartoon"
         ],
-        "version": 50,
+        "version": 51,
         "internalName": "ToonItaliaProvider",
         "description": "Archivio di Anime e Cartoni animati in italiano da ToonItalia.xyz",
         "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/ToonItaliaProvider.cs3",
