@@ -18,7 +18,8 @@ class CbProvider : MainAPI() {
     private val commonHeaders = mapOf(
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Referer" to "$mainUrl/",
-        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language" to "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7"
     )
 
     private val supportedHosts = listOf(
@@ -75,7 +76,7 @@ class CbProvider : MainAPI() {
         val searchConfigs = listOf("$mainUrl/?s=$query" to false, "$mainUrl/serietv/?s=$query" to true)
 
         searchConfigs.forEach { (baseUrl, isTv) ->
-            for (page in 1..10) { 
+            for (page in 1..5) { 
                 val url = if (page == 1) baseUrl else {
                     if (baseUrl.contains("serietv")) "$mainUrl/serietv/page/$page/?s=$query"
                     else "$mainUrl/page/$page/?s=$query"
@@ -85,10 +86,9 @@ class CbProvider : MainAPI() {
                 val items = document.select("div.card, div.post-video, article, div.mp-post, div.post, li.item-list, .result-item")
                 if (items.isEmpty()) break
                 items.forEach { element -> parseElement(element, isTv)?.let { allResults.add(it) } }
-                if (items.size < 5) break
             }
         }
-        return allResults.distinctBy { it.url }.sortedByDescending { it.name.contains(query, ignoreCase = true) }
+        return allResults.distinctBy { it.url }
     }
 
     override suspend fun load(url: String): LoadResponse {
@@ -158,13 +158,14 @@ class CbProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         data.split("###").forEach { rawLink ->
-            if (rawLink.contains("uprot.net") && rawLink.contains("msf")) {
-                // Esecuzione estrattore con controllo esplicito del tipo di ritorno
+            if (rawLink.contains("uprot.net") || rawLink.contains("msf") || rawLink.contains("maxstream")) {
+                val cleanLink = if (rawLink.contains("msf")) rawLink.replace("msf/", "embed-") + ".html" else rawLink
                 try {
-                    MaxStreamExtractor().getUrl(rawLink, mainUrl, subtitleCallback, callback)
+                    // Chiamata sicura per evitare l'errore 'not' per operator '!'
+                    MaxStreamExtractor().getUrl(cleanLink, mainUrl, subtitleCallback, callback)
                 } catch (e: Exception) {
-                    // Se l'estrattore fallisce o lancia eccezione, fallback sul bypass generico
-                    bypassShortener(rawLink)?.let { loadExtractor(it, subtitleCallback, callback) }
+                    val manualUrl = bypassMaxStreamManual(cleanLink)
+                    manualUrl?.let { loadExtractor(it, subtitleCallback, callback) }
                 }
             } else {
                 val finalUrl = when {
@@ -176,6 +177,17 @@ class CbProvider : MainAPI() {
             }
         }
         return true
+    }
+
+    private suspend fun bypassMaxStreamManual(url: String): String? {
+        return try {
+            val res = app.get(url, headers = commonHeaders)
+            val doc = res.document
+            // Cerca il file video direttamente nel sorgente HTML
+            val script = doc.select("script").html()
+            val videoUrl = Regex("""file:\s*"([^"]+)"""").find(script)?.groupValues?.get(1)
+            videoUrl ?: doc.selectFirst("iframe")?.attr("src") ?: res.url
+        } catch (e: Exception) { null }
     }
 
     private suspend fun bypassStayOnline(link: String): String? {
@@ -196,19 +208,12 @@ class CbProvider : MainAPI() {
             if (req.url != link && supportedHosts.any { req.url.contains(it) && !req.url.contains("uprot") }) return req.url
 
             val doc = req.document
-            
             val foundLink = doc.select("a, iframe").mapNotNull { 
                 val target = it.attr("href").ifBlank { it.attr("src") }
                 if (supportedHosts.any { host -> target.contains(host) } && !target.contains("uprot")) target else null
             }.firstOrNull()
             
-            if (foundLink != null) return foundLink
-
-            val hostPattern = supportedHosts.filter { it != "uprot" }.joinToString("|")
-            val regex = Regex("""https?://[\w\d\.]+\.(?:$hostPattern)[\w\d\.\-/=\?&%+]*""")
-            val match = regex.find(doc.html())?.value
-            
-            match ?: req.url
+            foundLink ?: req.url
         } catch (e: Exception) { null }
     }
 }
