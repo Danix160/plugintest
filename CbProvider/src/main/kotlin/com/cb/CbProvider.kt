@@ -105,7 +105,6 @@ class CbProvider : MainAPI() {
 
         if (!isSeries) {
             val linkList = mutableSetOf<String>()
-            // Parsing espanso: cerca ovunque, inclusi parametri data e iframe
             document.select("div[data-src], div[data-link], li[data-src], iframe, table a, a.buttona_stream, .stream-link").forEach { el ->
                 val link = el.attr("data-src").ifBlank { 
                     el.attr("data-link").ifBlank { el.attr("src").ifBlank { el.attr("href") } } 
@@ -160,10 +159,11 @@ class CbProvider : MainAPI() {
     ): Boolean {
         data.split("###").forEach { rawLink ->
             if (rawLink.contains("uprot.net") && rawLink.contains("msf")) {
-                // Proviamo l'estrattore dedicato
-                val success = MaxStreamExtractor().getUrl(rawLink, mainUrl, subtitleCallback, callback)
-                if (!success) {
-                    // Se fallisce (come visto nei log), proviamo il bypass generico
+                // Esecuzione estrattore con controllo esplicito del tipo di ritorno
+                try {
+                    MaxStreamExtractor().getUrl(rawLink, mainUrl, subtitleCallback, callback)
+                } catch (e: Exception) {
+                    // Se l'estrattore fallisce o lancia eccezione, fallback sul bypass generico
                     bypassShortener(rawLink)?.let { loadExtractor(it, subtitleCallback, callback) }
                 }
             } else {
@@ -197,7 +197,6 @@ class CbProvider : MainAPI() {
 
             val doc = req.document
             
-            // 1. Cerca link espliciti in A o IFRAME
             val foundLink = doc.select("a, iframe").mapNotNull { 
                 val target = it.attr("href").ifBlank { it.attr("src") }
                 if (supportedHosts.any { host -> target.contains(host) } && !target.contains("uprot")) target else null
@@ -205,7 +204,6 @@ class CbProvider : MainAPI() {
             
             if (foundLink != null) return foundLink
 
-            // 2. Deep Parsing: Scansione Regex dell'intero HTML per trovare URL degli host
             val hostPattern = supportedHosts.filter { it != "uprot" }.joinToString("|")
             val regex = Regex("""https?://[\w\d\.]+\.(?:$hostPattern)[\w\d\.\-/=\?&%+]*""")
             val match = regex.find(doc.html())?.value
