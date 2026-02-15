@@ -3,7 +3,7 @@
         "iconUrl": "https://cb01uno.one/wp-content/uploads/2026/01/logo-official-uno-2026.png",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/Danix160/plugintest",
-        "fileSize": 22183,
+        "fileSize": 22359,
         "status": 1,
         "language": "it",
         "authors": [
@@ -11,9 +11,10 @@
         ],
         "tvTypes": [
             "Movie",
-            "TvSeries"
+            "TvSeries",
+            "Cartoon"
         ],
-        "version": 19,
+        "version": 20,
         "internalName": "CbProvider",
         "description": "cb01uno.one",
         "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/CbProvider.cs3",
