@@ -1,12 +1,10 @@
 package com.cb
 
-import android.util.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import com.lagradost.cloudstream3.MainAPI
-import com.lagradost.cloudstream3.TvType
+import com.lagradost.cloudstream3.extractors.MaxStreamExtractor
 import org.json.JSONObject
-import com.cb.extractors.MaxStreamExtractor
+import org.jsoup.nodes.Element
 
 class CbProvider : MainAPI() {
     override var mainUrl = "https://cb01uno.one"
@@ -15,11 +13,12 @@ class CbProvider : MainAPI() {
     override var lang = "it"
     override val hasMainPage = true
 
+    // Header simulati per bypassare i blocchi 404/Nginx di MaxStream
     private val commonHeaders = mapOf(
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Referer" to "$mainUrl/",
-        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language" to "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7"
+        "Accept-Language" to "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Cache-Control" to "max-age=0"
     )
 
     private val supportedHosts = listOf(
@@ -41,7 +40,7 @@ class CbProvider : MainAPI() {
         }
     }
 
-    private fun parseElement(element: org.jsoup.nodes.Element, isTvSeriesSearch: Boolean = false): SearchResponse? {
+    private fun parseElement(element: Element, isTvSeriesSearch: Boolean = false): SearchResponse? {
         val titleElement = element.selectFirst("h2 a, h3 a, .card-title a, .post-title a, a[title]") ?: return null
         val href = titleElement.attr("href")
         if (href.contains("/tag/") || href.contains("/category/") || href.length < 15) return null
@@ -72,82 +71,50 @@ class CbProvider : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val allResults = mutableListOf<SearchResponse>()
-        val searchConfigs = listOf("$mainUrl/?s=$query" to false, "$mainUrl/serietv/?s=$query" to true)
-
-        searchConfigs.forEach { (baseUrl, isTv) ->
-            for (page in 1..5) { 
-                val url = if (page == 1) baseUrl else {
-                    if (baseUrl.contains("serietv")) "$mainUrl/serietv/page/$page/?s=$query"
-                    else "$mainUrl/page/$page/?s=$query"
-                }
-                val response = try { app.get(url, headers = commonHeaders, timeout = 10L) } catch (e: Exception) { null }
-                val document = response?.document ?: break
-                val items = document.select("div.card, div.post-video, article, div.mp-post, div.post, li.item-list, .result-item")
-                if (items.isEmpty()) break
-                items.forEach { element -> parseElement(element, isTv)?.let { allResults.add(it) } }
-            }
-        }
-        return allResults.distinctBy { it.url }
+        val searchUrl = "$mainUrl/?s=$query"
+        val document = app.get(searchUrl, headers = commonHeaders).document
+        return document.select("div.card, div.post-video, article, div.mp-post, .result-item").mapNotNull {
+            parseElement(it)
+        }.distinctBy { it.url }
     }
 
     override suspend fun load(url: String): LoadResponse {
         val document = app.get(url, headers = commonHeaders).document
         val isSeries = url.contains("/serietv/") || url.contains("/serie/")
-        
         val title = fixTitle(document.selectFirst("h1")?.text() ?: "", !isSeries)
         val poster = document.selectFirst("meta[property=\"og:image\"]")?.attr("content")
-        val plot = document.select("div.ignore-css p, .entry-content p, .post-content p").firstOrNull { it.text().length > 50 }?.text()
-                  ?.substringBefore("+Info")?.trim()
-        val year = Regex("\\d{4}").find(document.selectFirst("h1")?.text() ?: "")?.value?.toIntOrNull()
+        val plot = document.select("div.ignore-css p, .entry-content p").firstOrNull { it.text().length > 50 }?.text()
 
         val episodes = mutableListOf<Episode>()
 
         if (!isSeries) {
-            val linkList = mutableSetOf<String>()
-            document.select("div[data-src], div[data-link], li[data-src], iframe, table a, a.buttona_stream, .stream-link").forEach { el ->
-                val link = el.attr("data-src").ifBlank { 
-                    el.attr("data-link").ifBlank { el.attr("src").ifBlank { el.attr("href") } } 
-                }
-                if (link.contains("http") && (supportedHosts.any { link.contains(it) } || link.contains("stayonline") || link.contains("uprot"))) {
-                    linkList.add(link)
-                }
+            val links = document.select("table a, a.buttona_stream, .stream-link, iframe")
+                .map { it.attr("href").ifBlank { it.attr("src") } }
+                .filter { link -> supportedHosts.any { link.contains(it) } }
+            
+            if (links.isNotEmpty()) {
+                episodes.add(newEpisode(links.joinToString("###")) { this.name = "Film - Streaming" })
             }
-            val finalLinks = linkList.filter { !it.contains("youtube") }
-            if (finalLinks.isNotEmpty()) episodes.add(newEpisode(finalLinks.joinToString("###")) { this.name = "Film - Streaming" })
         } else {
-            document.select("div.sp-wrap, .entry-content table, .serie-tv-table, .sp-body").forEachIndexed { index, wrap ->
-                val seasonNum = index + 1
-                wrap.select("p, li, tr").forEach { row ->
-                    val links = row.select("a").filter { a -> 
-                        val h = a.attr("href")
-                        supportedHosts.any { host -> h.contains(host) } || h.contains("stayonline") || h.contains("uprot")
-                    }
-                    if (links.isNotEmpty()) {
-                        val text = row.text()
-                        val epNum = Regex("(?i)episodio\\s?(\\d+)").find(text)?.groupValues?.get(1)?.toIntOrNull()
-                        episodes.add(newEpisode(links.joinToString("###") { it.attr("href") }) {
-                            this.name = if (text.contains("-")) text.split("-").first().trim() else "Episodio $epNum"
-                            this.season = seasonNum
-                            this.episode = epNum
+            document.select("div.sp-wrap").forEachIndexed { index, wrap ->
+                wrap.select("p, li").forEach { row ->
+                    val rowLinks = row.select("a").map { it.attr("href") }
+                        .filter { link -> supportedHosts.any { link.contains(it) } }
+                    
+                    if (rowLinks.isNotEmpty()) {
+                        episodes.add(newEpisode(rowLinks.joinToString("###")) {
+                            this.name = row.text().substringBefore("–").trim()
+                            this.season = index + 1
                         })
                     }
                 }
             }
         }
 
-        return if (!isSeries) {
-            newMovieLoadResponse(title, url, TvType.Movie, episodes.firstOrNull()?.data ?: "") {
-                this.posterUrl = poster
-                this.plot = plot
-                this.year = year
-            }
+        return if (isSeries) {
+            newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) { this.posterUrl = poster; this.plot = plot }
         } else {
-            newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
-                this.posterUrl = poster
-                this.plot = plot
-                this.year = year
-            }
+            newMovieLoadResponse(title, url, TvType.Movie, episodes.firstOrNull()?.data ?: "") { this.posterUrl = poster; this.plot = plot }
         }
     }
 
@@ -158,20 +125,29 @@ class CbProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         data.split("###").forEach { rawLink ->
-            if (rawLink.contains("uprot.net") || rawLink.contains("msf") || rawLink.contains("maxstream")) {
-                val cleanLink = if (rawLink.contains("msf")) rawLink.replace("msf/", "embed-") + ".html" else rawLink
+            val cleanLink = rawLink.trim()
+            
+            // Logica specifica per MaxStream / Uprot / MSF
+            if (cleanLink.contains("uprot.net") || cleanLink.contains("msf") || cleanLink.contains("maxstream")) {
+                val embedUrl = if (cleanLink.contains("msf/")) {
+                    cleanLink.replace("msf/", "embed-") + ".html"
+                } else cleanLink
+
                 try {
-                    // Chiamata sicura per evitare l'errore 'not' per operator '!'
-                    MaxStreamExtractor().getUrl(cleanLink, mainUrl, subtitleCallback, callback)
+                    // Tenta estrattore ufficiale
+                    MaxStreamExtractor().getUrl(embedUrl, mainUrl, subtitleCallback, callback)
                 } catch (e: Exception) {
-                    val manualUrl = bypassMaxStreamManual(cleanLink)
-                    manualUrl?.let { loadExtractor(it, subtitleCallback, callback) }
+                    // Fallback manuale se l'estrattore fallisce
+                    bypassMaxStreamManual(embedUrl)?.let { directUrl ->
+                        if (directUrl.contains(".m3u8") || directUrl.contains(".mp4")) {
+                            callback.invoke(ExtractorLink("MaxStream", "MaxStream", directUrl, embedUrl, Qualities.P720.value, directUrl.contains(".m3u8")))
+                        } else loadExtractor(directUrl, subtitleCallback, callback)
+                    }
                 }
             } else {
                 val finalUrl = when {
-                    rawLink.contains("stayonline.pro") -> bypassStayOnline(rawLink)
-                    rawLink.contains("uprot.net") || rawLink.contains("swzz.xyz") || rawLink.contains("maxsa") -> bypassShortener(rawLink)
-                    else -> rawLink
+                    cleanLink.contains("stayonline.pro") -> bypassStayOnline(cleanLink)
+                    else -> cleanLink
                 }
                 finalUrl?.let { loadExtractor(it, subtitleCallback, callback) }
             }
@@ -182,11 +158,10 @@ class CbProvider : MainAPI() {
     private suspend fun bypassMaxStreamManual(url: String): String? {
         return try {
             val res = app.get(url, headers = commonHeaders)
-            val doc = res.document
-            // Cerca il file video direttamente nel sorgente HTML
-            val script = doc.select("script").html()
-            val videoUrl = Regex("""file:\s*"([^"]+)"""").find(script)?.groupValues?.get(1)
-            videoUrl ?: doc.selectFirst("iframe")?.attr("src") ?: res.url
+            val html = res.text
+            // Estrazione regex del file video se nascosto nello script
+            Regex("""file:\s*["'](http[^"']+)["']""").find(html)?.groupValues?.get(1)
+                ?: res.document.selectFirst("iframe")?.attr("src")
         } catch (e: Exception) { null }
     }
 
@@ -199,21 +174,6 @@ class CbProvider : MainAPI() {
                 data = mapOf("id" to id)
             ).text
             JSONObject(response).getJSONObject("data").getString("value")
-        } catch (e: Exception) { null }
-    }
-
-    private suspend fun bypassShortener(link: String): String? {
-        return try {
-            val req = app.get(link, headers = commonHeaders, allowRedirects = true)
-            if (req.url != link && supportedHosts.any { req.url.contains(it) && !req.url.contains("uprot") }) return req.url
-
-            val doc = req.document
-            val foundLink = doc.select("a, iframe").mapNotNull { 
-                val target = it.attr("href").ifBlank { it.attr("src") }
-                if (supportedHosts.any { host -> target.contains(host) } && !target.contains("uprot")) target else null
-            }.firstOrNull()
-            
-            foundLink ?: req.url
         } catch (e: Exception) { null }
     }
 }
