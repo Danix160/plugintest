@@ -2,7 +2,7 @@ package com.cb
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import com.lagradost.cloudstream3.extractors.MaxStreamExtractor
+import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import org.json.JSONObject
 import org.jsoup.nodes.Element
 
@@ -13,12 +13,10 @@ class CbProvider : MainAPI() {
     override var lang = "it"
     override val hasMainPage = true
 
-    // Header simulati per bypassare i blocchi 404/Nginx di MaxStream
     private val commonHeaders = mapOf(
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Referer" to "$mainUrl/",
-        "Accept-Language" to "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Cache-Control" to "max-age=0"
+        "Accept-Language" to "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7"
     )
 
     private val supportedHosts = listOf(
@@ -127,21 +125,26 @@ class CbProvider : MainAPI() {
         data.split("###").forEach { rawLink ->
             val cleanLink = rawLink.trim()
             
-            // Logica specifica per MaxStream / Uprot / MSF
             if (cleanLink.contains("uprot.net") || cleanLink.contains("msf") || cleanLink.contains("maxstream")) {
                 val embedUrl = if (cleanLink.contains("msf/")) {
                     cleanLink.replace("msf/", "embed-") + ".html"
                 } else cleanLink
 
-                try {
-                    // Tenta estrattore ufficiale
-                    MaxStreamExtractor().getUrl(embedUrl, mainUrl, subtitleCallback, callback)
-                } catch (e: Exception) {
-                    // Fallback manuale se l'estrattore fallisce
+                // Invece di chiamare MaxStreamExtractor() che fallisce, 
+                // usiamo loadExtractor che gestisce l'istanza internamente
+                if (!loadExtractor(embedUrl, subtitleCallback, callback)) {
+                    // Fallback manuale se l'estrattore non lo prende
                     bypassMaxStreamManual(embedUrl)?.let { directUrl ->
-                        if (directUrl.contains(".m3u8") || directUrl.contains(".mp4")) {
-                            callback.invoke(ExtractorLink("MaxStream", "MaxStream", directUrl, embedUrl, Qualities.P720.value, directUrl.contains(".m3u8")))
-                        } else loadExtractor(directUrl, subtitleCallback, callback)
+                        callback.invoke(
+                            newExtractorLink(
+                                name = "MaxStream Direct",
+                                source = "MaxStream",
+                                url = directUrl,
+                                referer = embedUrl,
+                                quality = Qualities.P720.value,
+                                isM3u8 = directUrl.contains(".m3u8")
+                            )
+                        )
                     }
                 }
             } else {
@@ -159,7 +162,6 @@ class CbProvider : MainAPI() {
         return try {
             val res = app.get(url, headers = commonHeaders)
             val html = res.text
-            // Estrazione regex del file video se nascosto nello script
             Regex("""file:\s*["'](http[^"']+)["']""").find(html)?.groupValues?.get(1)
                 ?: res.document.selectFirst("iframe")?.attr("src")
         } catch (e: Exception) { null }
