@@ -3,66 +3,10 @@ package com.toonitalia
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
-import com.lagradost.cloudstream3.utils.ExtractorApi
-import com.lagradost.cloudstream3.utils.getQualityFromName
-import com.lagradost.cloudstream3.utils.newExtractorLink
-import com.lagradost.cloudstream3.utils.ExtractorLinkType
+import com.lagradost.cloudstream3.MainAPI
+import com.lagradost.cloudstream3.TvType
 import org.jsoup.Jsoup
-import android.util.Log
 
-// --- ESTRATTORE PERSONALIZZATO PER RPMSHARE / RPMPLAY ---
-class RpmShare : ExtractorApi() {
-    override val name = "RPMShare"
-    override val mainUrl = "https://rpmplay.xyz"
-    override val requiresReferer = true
-
-    override suspend fun getUrl(
-        url: String,
-        referer: String?,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ) {
-        val id = url.substringAfter("#")
-        if (id == url) return
-
-        val apiUrl = "https://rpmplay.xyz/api/source/$id"
-        
-        try {
-            val response = app.post(
-                apiUrl,
-                data = mapOf("r" to "", "d" to "rpmplay.xyz"),
-                headers = mapOf(
-                    "Referer" to url,
-                    "X-Requested-With" to "XMLHttpRequest",
-                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-                )
-            )
-
-            // Parsing della risposta JSON
-            val json = response.parsedSafe<RpmResponse>()
-            json?.data?.forEach { stream ->
-                callback.invoke(
-                    newExtractorLink(
-                     this.name,
-                        this.name,
-                        finalUrl,
-                        if (finalUrl.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
-                    ) {
-                        this.quality = Qualities.P1080.value
-                        this.referer = url
-                    }
-                )
-            }
-        } catch (e: Exception) {
-            Log.e("RpmShare", "Errore estrazione: ${e.message}")
-        }
-    }
-
-    data class RpmResponse(val data: List<RpmStream>)
-    data class RpmStream(val file: String, val label: String)
-}
-
-// --- PROVIDER PRINCIPALE TOONITALIA ---
 class ToonItaliaProvider : MainAPI() {
     override var mainUrl = "https://toonitalia.xyz"
     override var name = "ToonItalia"
@@ -78,7 +22,7 @@ class ToonItaliaProvider : MainAPI() {
     )
 
     private val supportedHosts = listOf(
-        "voe", "chuckle-tube", "luluvdo", "lulustream", "vidhide", "rpmshare", "rpmplay", "streamup",
+        "voe", "chuckle-tube", "luluvdo", "lulustream", "vidhide", "rpmshare", "rpmplay", "streamup", "rpmplay",
         "mixdrop", "streamtape", "fastream", "filemoon", "wolfstream", "streamwish"
     )
 
@@ -93,7 +37,9 @@ class ToonItaliaProvider : MainAPI() {
             .replace("chuckle-tube.com", "voe.sx")
             .replace("luluvdo.com", "lulustream.com")
             .replace("luluvideo.com", "lulustream.com")
-            .replace("toonitalia.rpmplay.xyz/", "rpmplay.xyz/")
+            .replace("toonitalia.rpmplay.xyz/", "rpmplay.xyz")
+            .replace("luluvdo.com", "lulustream.com")
+            // Streamup usa la stessa struttura di StreamWish
             .replace("streamup.ws", "streamwish.to")
     }
 
@@ -113,6 +59,7 @@ class ToonItaliaProvider : MainAPI() {
                 this.posterHeaders = commonHeaders
             }
         }
+        
         return newHomePageResponse(request.name, items)
     }
 
@@ -148,10 +95,12 @@ class ToonItaliaProvider : MainAPI() {
         val entryContent = document.selectFirst("div.entry-content")
         val fullText = entryContent?.text() ?: ""
 
+        // --- RICONOSCIMENTO TIPO (FILM VS SERIE) TRAMITE CATEGORIE ---
         val categories = document.select(".entry-categories-inner a").map { it.text().lowercase() }
         val isMovie = categories.any { it.contains("film animazione") || it == "film" }
         val tvType = if (isMovie) TvType.Movie else TvType.TvSeries
 
+        // --- SOLUZIONE TRAMA ---
         val tramaElement = document.selectFirst("h3:contains(Trama:), p:contains(Trama:), b:contains(Trama:)")
         var plot = if (tramaElement != null) {
             val nextText = tramaElement.nextSibling()?.toString()?.replace(Regex("<[^>]*>"), "")?.trim()
@@ -165,6 +114,7 @@ class ToonItaliaProvider : MainAPI() {
                 }
         }
 
+        // Pulizia stringhe di chiusura
         val stopWords = listOf("(?i)Fonte:", "(?i)Animeclick", "(?i)\\bLink\\b")
         stopWords.forEach { word -> plot = plot?.split(Regex(word), 2)?.first()?.trim() }
 
@@ -172,6 +122,8 @@ class ToonItaliaProvider : MainAPI() {
         val year = Regex("""\b(19\d{2}|20[0-2]\d)\b""").find(fullText)?.groupValues?.get(1)?.toIntOrNull()
 
         val episodes = mutableListOf<Episode>()
+        
+        // --- ESTRAZIONE EPISODI CON MULTI-MIRROR ---
         val lines = entryContent?.html()?.split(Regex("<br\\s*/?>|</p>|</div>|<li>|\\n")) ?: listOf()
         var absoluteEpCounter = 1
 
@@ -179,6 +131,7 @@ class ToonItaliaProvider : MainAPI() {
             val docLine = Jsoup.parseBodyFragment(line)
             val text = docLine.text().trim()
             
+            // Trova tutti i mirror nella riga (es. VOE e RPMShare)
             val validLinks = docLine.select("a").filter { a -> 
                 val href = a.attr("href")
                 href.startsWith("http") && 
@@ -193,6 +146,7 @@ class ToonItaliaProvider : MainAPI() {
                 val s = if (isTrailerRow) 0 else if (isMovie) null else (matchSE?.groupValues?.get(1)?.toIntOrNull() ?: 1)
                 val e = if (isTrailerRow) 0 else if (isMovie) null else (matchSE?.groupValues?.get(2)?.toIntOrNull() ?: absoluteEpCounter)
 
+                // Uniamo i mirror con ### per gestirli in loadLinks
                 val dataUrls = validLinks.joinToString("###")
                 
                 var epName = text.split(Regex("(?i)VOE|Lulu|Streaming|Vidhide|Mixdrop|RPMShare|VIDHIDE|STREAMUP|Link| -")).first().trim()
@@ -235,18 +189,11 @@ class ToonItaliaProvider : MainAPI() {
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
-        subtitleCallback: (SubtitleFile) -> Unit,
+        subtitleCallback: (com.lagradost.cloudstream3.SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         data.split("###").forEach { url ->
-            val fixedUrl = fixHostUrl(url)
-            
-            if (fixedUrl.contains("rpmplay.xyz")) {
-                // Chiamiamo l'estrattore RPMShare personalizzato
-                RpmShare().getUrl(fixedUrl, "$mainUrl/", subtitleCallback, callback)
-            } else {
-                loadExtractor(fixedUrl, subtitleCallback, callback)
-            }
+            loadExtractor(fixHostUrl(url), subtitleCallback, callback)
         }
         return true
     }
