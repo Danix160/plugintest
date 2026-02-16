@@ -5,7 +5,10 @@ import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.utils.ExtractorApi
 import com.lagradost.cloudstream3.utils.getQualityFromName
+import com.lagradost.cloudstream3.utils.newExtractorLink
+import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import org.jsoup.Jsoup
+import android.util.Log
 
 // --- ESTRATTORE PERSONALIZZATO PER RPMSHARE / RPMPLAY ---
 class RpmShare : ExtractorApi() {
@@ -13,39 +16,44 @@ class RpmShare : ExtractorApi() {
     override val mainUrl = "https://rpmplay.xyz"
     override val requiresReferer = true
 
-    override suspend fun getUrl(url: String, referer: String?): List<ExtractorLink>? {
-        // Estraiamo l'ID dall'hash (es. zth3k da #zth3k)
+    override suspend fun getUrl(
+        url: String,
+        referer: String?,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ) {
         val id = url.substringAfter("#")
-        if (id == url) return null
+        if (id == url) return
 
-        // Endpoint API per ottenere il file sorgente
         val apiUrl = "https://rpmplay.xyz/api/source/$id"
         
-        // Simulazione della chiamata XHR che farebbe il browser
-        val response = app.post(
-            apiUrl,
-            data = mapOf("r" to "", "d" to "rpmplay.xyz"),
-            headers = mapOf(
-                "Referer" to url,
-                "X-Requested-With" to "XMLHttpRequest",
-                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        try {
+            val response = app.post(
+                apiUrl,
+                data = mapOf("r" to "", "d" to "rpmplay.xyz"),
+                headers = mapOf(
+                    "Referer" to url,
+                    "X-Requested-With" to "XMLHttpRequest",
+                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+                )
             )
-        )
 
-        return try {
-            // Parsing della risposta JSON: {"data": [{"file": "...", "label": "1080p"}]}
-            response.parsed<RpmResponse>().data.map { stream ->
-                ExtractorLink(
-                    source = name,
-                    name = name,
-                    url = stream.file,
-                    referer = url,
-                    quality = getQualityFromName(stream.label),
-                    isM3u8 = stream.file.contains("m3u8")
+            // Parsing della risposta JSON
+            val json = response.parsedSafe<RpmResponse>()
+            json?.data?.forEach { stream ->
+                callback.invoke(
+                    newExtractorLink(
+                        source = this.name,
+                        name = this.name,
+                        url = stream.file,
+                        referer = url,
+                        quality = getQualityFromName(stream.label),
+                        type = if (stream.file.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                    )
                 )
             }
         } catch (e: Exception) {
-            null
+            Log.e("RpmShare", "Errore estrazione: ${e.message}")
         }
     }
 
@@ -226,17 +234,16 @@ class ToonItaliaProvider : MainAPI() {
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
-        subtitleCallback: (com.lagradost.cloudstream3.SubtitleFile) -> Unit,
+        subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         data.split("###").forEach { url ->
             val fixedUrl = fixHostUrl(url)
             
-            // Gestione speciale per RPMShare/RPMPLAY
             if (fixedUrl.contains("rpmplay.xyz")) {
-                RpmShare().getUrl(fixedUrl, "$mainUrl/")?.forEach(callback)
+                // Chiamiamo l'estrattore RPMShare personalizzato
+                RpmShare().getUrl(fixedUrl, "$mainUrl/", subtitleCallback, callback)
             } else {
-                // Gestione standard per tutti gli altri host
                 loadExtractor(fixedUrl, subtitleCallback, callback)
             }
         }
