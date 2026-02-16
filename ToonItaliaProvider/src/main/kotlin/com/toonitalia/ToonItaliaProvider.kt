@@ -3,10 +3,57 @@ package com.toonitalia
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
-import com.lagradost.cloudstream3.MainAPI
-import com.lagradost.cloudstream3.TvType
+import com.lagradost.cloudstream3.utils.ExtractorApi
+import com.lagradost.cloudstream3.utils.getQualityFromName
 import org.jsoup.Jsoup
 
+// --- ESTRATTORE PERSONALIZZATO PER RPMSHARE / RPMPLAY ---
+class RpmShare : ExtractorApi() {
+    override val name = "RPMShare"
+    override val mainUrl = "https://rpmplay.xyz"
+    override val requiresReferer = true
+
+    override suspend fun getUrl(url: String, referer: String?): List<ExtractorLink>? {
+        // Estraiamo l'ID dall'hash (es. zth3k da #zth3k)
+        val id = url.substringAfter("#")
+        if (id == url) return null
+
+        // Endpoint API per ottenere il file sorgente
+        val apiUrl = "https://rpmplay.xyz/api/source/$id"
+        
+        // Simulazione della chiamata XHR che farebbe il browser
+        val response = app.post(
+            apiUrl,
+            data = mapOf("r" to "", "d" to "rpmplay.xyz"),
+            headers = mapOf(
+                "Referer" to url,
+                "X-Requested-With" to "XMLHttpRequest",
+                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            )
+        )
+
+        return try {
+            // Parsing della risposta JSON: {"data": [{"file": "...", "label": "1080p"}]}
+            response.parsed<RpmResponse>().data.map { stream ->
+                ExtractorLink(
+                    source = name,
+                    name = name,
+                    url = stream.file,
+                    referer = url,
+                    quality = getQualityFromName(stream.label),
+                    isM3u8 = stream.file.contains("m3u8")
+                )
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    data class RpmResponse(val data: List<RpmStream>)
+    data class RpmStream(val file: String, val label: String)
+}
+
+// --- PROVIDER PRINCIPALE TOONITALIA ---
 class ToonItaliaProvider : MainAPI() {
     override var mainUrl = "https://toonitalia.xyz"
     override var name = "ToonItalia"
@@ -22,7 +69,7 @@ class ToonItaliaProvider : MainAPI() {
     )
 
     private val supportedHosts = listOf(
-        "voe", "chuckle-tube", "luluvdo", "lulustream", "vidhide", "rpmshare", "rpmplay", "streamup", "rpmplay",
+        "voe", "chuckle-tube", "luluvdo", "lulustream", "vidhide", "rpmshare", "rpmplay", "streamup",
         "mixdrop", "streamtape", "fastream", "filemoon", "wolfstream", "streamwish"
     )
 
@@ -37,9 +84,7 @@ class ToonItaliaProvider : MainAPI() {
             .replace("chuckle-tube.com", "voe.sx")
             .replace("luluvdo.com", "lulustream.com")
             .replace("luluvideo.com", "lulustream.com")
-            .replace("toonitalia.rpmplay.xyz/", "rpmplay.xyz")
-            .replace("luluvdo.com", "lulustream.com")
-            // Streamup usa la stessa struttura di StreamWish
+            .replace("toonitalia.rpmplay.xyz/", "rpmplay.xyz/")
             .replace("streamup.ws", "streamwish.to")
     }
 
@@ -59,7 +104,6 @@ class ToonItaliaProvider : MainAPI() {
                 this.posterHeaders = commonHeaders
             }
         }
-        
         return newHomePageResponse(request.name, items)
     }
 
@@ -95,12 +139,10 @@ class ToonItaliaProvider : MainAPI() {
         val entryContent = document.selectFirst("div.entry-content")
         val fullText = entryContent?.text() ?: ""
 
-        // --- RICONOSCIMENTO TIPO (FILM VS SERIE) TRAMITE CATEGORIE ---
         val categories = document.select(".entry-categories-inner a").map { it.text().lowercase() }
         val isMovie = categories.any { it.contains("film animazione") || it == "film" }
         val tvType = if (isMovie) TvType.Movie else TvType.TvSeries
 
-        // --- SOLUZIONE TRAMA ---
         val tramaElement = document.selectFirst("h3:contains(Trama:), p:contains(Trama:), b:contains(Trama:)")
         var plot = if (tramaElement != null) {
             val nextText = tramaElement.nextSibling()?.toString()?.replace(Regex("<[^>]*>"), "")?.trim()
@@ -114,7 +156,6 @@ class ToonItaliaProvider : MainAPI() {
                 }
         }
 
-        // Pulizia stringhe di chiusura
         val stopWords = listOf("(?i)Fonte:", "(?i)Animeclick", "(?i)\\bLink\\b")
         stopWords.forEach { word -> plot = plot?.split(Regex(word), 2)?.first()?.trim() }
 
@@ -122,8 +163,6 @@ class ToonItaliaProvider : MainAPI() {
         val year = Regex("""\b(19\d{2}|20[0-2]\d)\b""").find(fullText)?.groupValues?.get(1)?.toIntOrNull()
 
         val episodes = mutableListOf<Episode>()
-        
-        // --- ESTRAZIONE EPISODI CON MULTI-MIRROR ---
         val lines = entryContent?.html()?.split(Regex("<br\\s*/?>|</p>|</div>|<li>|\\n")) ?: listOf()
         var absoluteEpCounter = 1
 
@@ -131,7 +170,6 @@ class ToonItaliaProvider : MainAPI() {
             val docLine = Jsoup.parseBodyFragment(line)
             val text = docLine.text().trim()
             
-            // Trova tutti i mirror nella riga (es. VOE e RPMShare)
             val validLinks = docLine.select("a").filter { a -> 
                 val href = a.attr("href")
                 href.startsWith("http") && 
@@ -146,7 +184,6 @@ class ToonItaliaProvider : MainAPI() {
                 val s = if (isTrailerRow) 0 else if (isMovie) null else (matchSE?.groupValues?.get(1)?.toIntOrNull() ?: 1)
                 val e = if (isTrailerRow) 0 else if (isMovie) null else (matchSE?.groupValues?.get(2)?.toIntOrNull() ?: absoluteEpCounter)
 
-                // Uniamo i mirror con ### per gestirli in loadLinks
                 val dataUrls = validLinks.joinToString("###")
                 
                 var epName = text.split(Regex("(?i)VOE|Lulu|Streaming|Vidhide|Mixdrop|RPMShare|VIDHIDE|STREAMUP|Link| -")).first().trim()
@@ -193,7 +230,15 @@ class ToonItaliaProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         data.split("###").forEach { url ->
-            loadExtractor(fixHostUrl(url), subtitleCallback, callback)
+            val fixedUrl = fixHostUrl(url)
+            
+            // Gestione speciale per RPMShare/RPMPLAY
+            if (fixedUrl.contains("rpmplay.xyz")) {
+                RpmShare().getUrl(fixedUrl, "$mainUrl/")?.forEach(callback)
+            } else {
+                // Gestione standard per tutti gli altri host
+                loadExtractor(fixedUrl, subtitleCallback, callback)
+            }
         }
         return true
     }
