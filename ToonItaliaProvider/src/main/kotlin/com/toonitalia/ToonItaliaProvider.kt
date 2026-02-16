@@ -43,13 +43,14 @@ class RpmShare : ExtractorApi() {
             json?.data?.forEach { stream ->
                 callback.invoke(
                     newExtractorLink(
-                        source = this.name,
-                        name = this.name,
-                        url = stream.file,
-                        referer = url,
-                        quality = getQualityFromName(stream.label),
-                        type = if (stream.file.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
-                    )
+                     this.name,
+                        this.name,
+                        finalUrl,
+                        if (finalUrl.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                    ) {
+                        this.quality = Qualities.P1080.value
+                        this.referer = url
+                    }
                 )
             }
         } catch (e: Exception) {
