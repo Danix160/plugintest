@@ -21,10 +21,9 @@ class ToonItaliaProvider : MainAPI() {
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     )
 
-    // Lista host supportati per il filtraggio dei link
     private val supportedHosts = listOf(
-        "voe", "chuckle-tube", "luluvdo", "lulustream", "vidhide", "rpmshare", "rpmplay",
-        "mixdrop", "streamtape", "fastream", "filemoon", "wolfstream", "streamwish", "mivalyo"
+        "voe", "chuckle-tube", "luluvdo", "lulustream", "vidhide", "rpmshare", "rpmplay", "streamup", "rpmplay",
+        "mixdrop", "streamtape", "fastream", "filemoon", "wolfstream", "streamwish"
     )
 
     override val mainPage = mainPageOf(
@@ -34,42 +33,33 @@ class ToonItaliaProvider : MainAPI() {
     )
 
     private fun fixHostUrl(url: String): String {
-        var fixedUrl = url.trim()
-        
-        // --- GESTIONE RPM (RPMPlay / RPMShare) ---
-        if (fixedUrl.contains("rpmplay") || fixedUrl.contains("rpmshare")) {
-            val id = if (fixedUrl.contains("#")) {
-                fixedUrl.substringAfterLast("#")
-            } else {
-                fixedUrl.substringAfterLast("/")
-            }
-            // Forza il dominio principale e il path /e/ per l'estrattore
-            return "https://rpmshare.club/e/$id"
-        }
-
-        // --- ALTRI FIX HOST ---
-        return fixedUrl
+        return url
             .replace("chuckle-tube.com", "voe.sx")
             .replace("luluvdo.com", "lulustream.com")
-            .replace("ryderjet.com", "vidhide.com")
-            .replace("mivalyo.com", "vidhide.com")
+            .replace("luluvideo.com", "lulustream.com")
+            .replace("toonitalia.rpmplay.xyz/", "rpmplay.xyz")
+            .replace("luluvdo.com", "lulustream.com")
+            // Streamup usa la stessa struttura di StreamWish
+            .replace("streamup.ws", "streamwish.to")
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = if (page <= 1) request.data else "${request.data}/page/$page/"
-        val document = app.get(url, headers = commonHeaders).document
+        val document = app.get(url, headers = commonHeaders, timeout = 10).document
         
         val items = document.select("article").mapNotNull { article ->
             val titleHeader = article.selectFirst("h2.entry-title a") ?: return@mapNotNull null
             val href = titleHeader.attr("href")
-            val posterUrl = article.selectFirst("img")?.let { 
-                it.attr("src") ?: it.attr("data-src") 
-            } ?: searchPlaceholderLogo
+            val posterUrl = article.selectFirst("img")?.attr("src") 
+                ?: article.selectFirst("img")?.attr("data-src")
+                ?: searchPlaceholderLogo
 
             newTvSeriesSearchResponse(titleHeader.text(), href, TvType.TvSeries) {
                 this.posterUrl = posterUrl
+                this.posterHeaders = commonHeaders
             }
         }
+        
         return newHomePageResponse(request.name, items)
     }
 
@@ -79,10 +69,16 @@ class ToonItaliaProvider : MainAPI() {
         
         return document.select("article").amap { article ->
             val titleHeader = article.selectFirst("h2.entry-title a") ?: return@amap null
+            val title = titleHeader.text()
             val href = titleHeader.attr("href")
 
-            newTvSeriesSearchResponse(titleHeader.text(), href, TvType.TvSeries) {
-                this.posterUrl = searchPlaceholderLogo
+            val innerPage = app.get(href, headers = commonHeaders).document
+            val posterUrl = innerPage.selectFirst("img.attachment-post-thumbnail, .post-thumbnail img, .entry-content img")?.attr("src")
+                ?: innerPage.selectFirst("meta[property=\"og:image\"]")?.attr("content")
+
+            newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
+                this.posterUrl = posterUrl ?: searchPlaceholderLogo
+                this.posterHeaders = commonHeaders
             }
         }.filterNotNull()
     }
@@ -93,64 +89,111 @@ class ToonItaliaProvider : MainAPI() {
         val title = document.selectFirst("h1.entry-title")?.text()
             ?.replace(Regex("(?i)streaming|sub\\s?ita"), "")?.trim() ?: ""
         
-        val poster = document.selectFirst("img.attachment-post-thumbnail, .post-thumbnail img")?.attr("src")
+        val poster = document.selectFirst("img.attachment-post-thumbnail, .post-thumbnail img, .entry-content img")?.attr("src")
             ?: searchPlaceholderLogo
 
         val entryContent = document.selectFirst("div.entry-content")
+        val fullText = entryContent?.text() ?: ""
+
+        // --- RICONOSCIMENTO TIPO (FILM VS SERIE) TRAMITE CATEGORIE ---
+        val categories = document.select(".entry-categories-inner a").map { it.text().lowercase() }
+        val isMovie = categories.any { it.contains("film animazione") || it == "film" }
+        val tvType = if (isMovie) TvType.Movie else TvType.TvSeries
+
+        // --- SOLUZIONE TRAMA ---
+        val tramaElement = document.selectFirst("h3:contains(Trama:), p:contains(Trama:), b:contains(Trama:)")
+        var plot = if (tramaElement != null) {
+            val nextText = tramaElement.nextSibling()?.toString()?.replace(Regex("<[^>]*>"), "")?.trim()
+            if (!nextText.isNullOrBlank()) nextText else tramaElement.parent()?.text()?.substringAfter("Trama:")?.trim()
+        } else {
+            document.select("div.entry-content p")
+                .map { it.text() }
+                .firstOrNull { 
+                    it.length > 60 && 
+                    !it.contains(Regex("(?i)Titolo originale|Paese di origine|Stato Opera|Aggiornamento")) 
+                }
+        }
+
+        // Pulizia stringhe di chiusura
+        val stopWords = listOf("(?i)Fonte:", "(?i)Animeclick", "(?i)\\bLink\\b")
+        stopWords.forEach { word -> plot = plot?.split(Regex(word), 2)?.first()?.trim() }
+
+        val duration = Regex("""(\d+)\s?min""").find(fullText)?.groupValues?.get(1)?.toIntOrNull()
+        val year = Regex("""\b(19\d{2}|20[0-2]\d)\b""").find(fullText)?.groupValues?.get(1)?.toIntOrNull()
+
         val episodes = mutableListOf<Episode>()
         
-        val rows = entryContent?.select("p, li, tr, div") ?: listOf()
+        // --- ESTRAZIONE EPISODI CON MULTI-MIRROR ---
+        val lines = entryContent?.html()?.split(Regex("<br\\s*/?>|</p>|</div>|<li>|\\n")) ?: listOf()
         var absoluteEpCounter = 1
 
-        rows.forEach { row ->
-            val links = row.select("a").filter { a -> 
+        lines.forEach { line ->
+            val docLine = Jsoup.parseBodyFragment(line)
+            val text = docLine.text().trim()
+            
+            // Trova tutti i mirror nella riga (es. VOE e RPMShare)
+            val validLinks = docLine.select("a").filter { a -> 
                 val href = a.attr("href")
+                href.startsWith("http") && 
+                !href.contains("toonitalia.xyz") && 
                 supportedHosts.any { host -> href.contains(host) }
             }.map { it.attr("href") }.distinct()
 
-            if (links.isNotEmpty()) {
-                val text = row.text().trim()
-                if (text.contains(Regex("(?i)sigla|intro|trailer"))) return@forEach
-
+            if (validLinks.isNotEmpty()) {
+                val isTrailerRow = text.contains(Regex("(?i)sigla|intro|trailer"))
                 val matchSE = Regex("""(\d+)[×x](\d+)""").find(text)
-                val s = matchSE?.groupValues?.get(1)?.toIntOrNull() ?: 1
-                val e = matchSE?.groupValues?.get(2)?.toIntOrNull() ?: absoluteEpCounter
 
-                val dataUrls = links.joinToString("###")
-                
-                // --- REGEX DI PULIZIA NOME EPISODIO CON TUTTI GLI HOST ---
-                val hostCleaner = Regex("(?i)VOE|Lulu|RPM|Vidhide|Mivalyo|Mixdrop|Streamtape|Fastream|Filemoon|Wolfstream|Streamwish|Streaming|Link| -")
-                var epName = text.split(hostCleaner).first().trim()
-                
-                // Rimuove scritte residue (es. date o "Aggiornato il")
-                epName = epName.replace(Regex("(?i)Aggiornato.*|\\d{2}/\\d{2}/\\d{4}"), "").trim()
+                val s = if (isTrailerRow) 0 else if (isMovie) null else (matchSE?.groupValues?.get(1)?.toIntOrNull() ?: 1)
+                val e = if (isTrailerRow) 0 else if (isMovie) null else (matchSE?.groupValues?.get(2)?.toIntOrNull() ?: absoluteEpCounter)
 
-                if (epName.isEmpty() || epName.length < 2) epName = "Episodio $e"
+                // Uniamo i mirror con ### per gestirli in loadLinks
+                val dataUrls = validLinks.joinToString("###")
+                
+                var epName = text.split(Regex("(?i)VOE|Lulu|Streaming|Vidhide|Mixdrop|RPMShare|VIDHIDE|STREAMUP|Link| -")).first().trim()
+                if (epName.isEmpty() || epName.length < 2) {
+                    epName = if (isMovie) "Film" else "Episodio $absoluteEpCounter"
+                }
 
                 episodes.add(newEpisode(dataUrls) {
                     this.name = epName
                     this.season = s
                     this.episode = e
+                    this.posterUrl = poster
                 })
 
-                if (matchSE == null) absoluteEpCounter++
+                if (!isMovie && !isTrailerRow && matchSE == null) absoluteEpCounter++ 
             }
         }
 
-        return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes.distinctBy { it.data }) {
-            this.posterUrl = poster
+        val finalEpisodes = episodes.sortedWith(compareBy({ it.season ?: 0 }, { it.episode ?: 0 }))
+
+        return if (tvType == TvType.Movie) {
+            newMovieLoadResponse(title, url, TvType.Movie, finalEpisodes.firstOrNull()?.data ?: "") {
+                this.posterUrl = poster
+                this.plot = plot
+                this.year = year
+                this.duration = duration
+                this.posterHeaders = commonHeaders
+            }
+        } else {
+            newTvSeriesLoadResponse(title, url, tvType, finalEpisodes) {
+                this.posterUrl = poster
+                this.plot = plot
+                this.year = year
+                this.duration = duration
+                this.posterHeaders = commonHeaders
+            }
         }
     }
 
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
-        subtitleCallback: (SubtitleFile) -> Unit,
+        subtitleCallback: (com.lagradost.cloudstream3.SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         data.split("###").forEach { url ->
-            val fixedUrl = fixHostUrl(url)
-            loadExtractor(fixedUrl, subtitleCallback, callback)
+            loadExtractor(fixHostUrl(url), subtitleCallback, callback)
         }
         return true
     }
