@@ -180,7 +180,4 @@ class ToonItaliaProvider : MainAPI() {
         }
         return true
     }
-}
-        
-        return newHomePageResponse(request.name, items)
-    }
+}       
