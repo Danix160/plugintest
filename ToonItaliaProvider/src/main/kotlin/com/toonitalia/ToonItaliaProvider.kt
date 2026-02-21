@@ -146,7 +146,7 @@ class ToonItaliaProvider : MainAPI() {
 
                 val dataUrls = validLinks.joinToString("###")
                 
-                var epName = text.split(Regex("(?i)VOE|Lulu|Streaming|Vidhide|Mixdrop|RPMShare|VIDHIDE|STREAMUP|Link| -")).first().trim()
+                var epName = text.split(Regex("(?i)VOE|Lulu|Streaming|Vidhide|Mixdrop|RPMShare|STREAMUP|Link| -")).first().trim()
                 if (epName.isEmpty() || epName.length < 2) {
                     epName = if (isMovie) "Film" else "Episodio $absoluteEpCounter"
                 }
