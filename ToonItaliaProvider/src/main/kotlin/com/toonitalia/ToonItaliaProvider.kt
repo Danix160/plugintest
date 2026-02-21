@@ -24,7 +24,7 @@ class ToonItaliaProvider : MainAPI() {
     // Lista host aggiornata per includere i nuovi estrattori e mirror
     private val supportedHosts = listOf(
         "voe", "chuckle-tube", "luluvdo", "lulustream", "vidhide", "ryderjet", 
-        "minochinos", "megavido", "rpmshare", "rpmplay", "streamup", 
+        "minochinos", "megavido", "rpmshare", "rpmplay", "streamup", "smoothpre",
         "mixdrop", "streamtape", "fastream", "filemoon", "wolfstream", "streamwish"
     )
 
@@ -44,6 +44,7 @@ class ToonItaliaProvider : MainAPI() {
             // Ryderjet ora ha il suo estrattore dedicato
             .replace("ryderjet.com", "ryderjet.com") 
             // Mapping verso VidHideHub per i mirror di Vidhide
+            .replace("smoothpre.com", "vidhidehub.com")
             .replace("minochinos.com", "vidhidehub.com")
             .replace("megavido.com", "vidhidehub.com")
             .replace("vidhidepro.com", "vidhidehub.com")
