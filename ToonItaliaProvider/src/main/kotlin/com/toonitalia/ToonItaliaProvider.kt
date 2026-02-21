@@ -42,7 +42,7 @@ class ToonItaliaProvider : MainAPI() {
             .replace("luluvideo.com", "lulustream.com")
             .replace("toonitalia.rpmplay.xyz/", "rpmplay.xyz")
             // Ryderjet ora ha il suo estrattore dedicato
-            .replace("ryderjet.com", "ryderjet.com") 
+            .replace("ryderjet.com", "vidhidehub.com") 
             // Mapping verso VidHideHub per i mirror di Vidhide
             .replace("smoothpre.com", "vidhidehub.com")
             .replace("minochinos.com", "vidhidehub.com")
