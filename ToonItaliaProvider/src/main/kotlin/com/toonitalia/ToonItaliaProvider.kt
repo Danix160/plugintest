@@ -3,6 +3,7 @@ package com.toonitalia
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
+import com.lagradost.cloudstream3.utils.AppUtils.amap
 import com.lagradost.cloudstream3.MainAPI
 import com.lagradost.cloudstream3.TvType
 import org.jsoup.Jsoup
@@ -21,7 +22,6 @@ class ToonItaliaProvider : MainAPI() {
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     )
 
-    // Lista host aggiornata per includere i nuovi estrattori e mirror
     private val supportedHosts = listOf(
         "voe", "chuckle-tube", "luluvdo", "lulustream", "vidhide", "ryderjet", 
         "minochinos", "megavido", "rpmshare", "rpmplay", "streamup", "smoothpre",
@@ -34,22 +34,18 @@ class ToonItaliaProvider : MainAPI() {
         "$mainUrl/category/serie-tv/" to "Serie TV",
     )
 
-    // Mapping ottimizzato per i nuovi estrattori Ryderjet e VidHideHub
     private fun fixHostUrl(url: String): String {
         return url
             .replace("chuckle-tube.com", "voe.sx")
             .replace("luluvdo.com", "lulustream.com")
             .replace("luluvideo.com", "lulustream.com")
             .replace("toonitalia.rpmplay.xyz/", "rpmplay.xyz")
-            // Ryderjet ora ha il suo estrattore dedicato
             .replace("ryderjet.com", "vidhidehub.com") 
-            // Mapping verso VidHideHub per i mirror di Vidhide
             .replace("smoothpre.com", "vidhidehub.com")
             .replace("minochinos.com", "vidhidehub.com")
             .replace("megavido.com", "vidhidehub.com")
             .replace("vidhidepro.com", "vidhidehub.com")
             .replace("vidhide.com", "vidhidehub.com")
-            // Streamup usa la stessa struttura di StreamWish
             .replace("streamup.ws", "streamwish.to")
     }
 
@@ -69,7 +65,6 @@ class ToonItaliaProvider : MainAPI() {
                 this.posterHeaders = commonHeaders
             }
         }
-        
         return newHomePageResponse(request.name, items)
     }
 
@@ -103,8 +98,6 @@ class ToonItaliaProvider : MainAPI() {
             ?: searchPlaceholderLogo
 
         val entryContent = document.selectFirst("div.entry-content")
-        val fullText = entryContent?.text() ?: ""
-
         val categories = document.select(".entry-categories-inner a").map { it.text().lowercase() }
         val isMovie = categories.any { it.contains("film animazione") || it == "film" }
         val tvType = if (isMovie) TvType.Movie else TvType.TvSeries
@@ -133,11 +126,9 @@ class ToonItaliaProvider : MainAPI() {
             }.map { it.attr("href") }.distinct()
 
             if (validLinks.isNotEmpty()) {
-                val isTrailerRow = text.contains(Regex("(?i)sigla|intro|trailer"))
                 val matchSE = Regex("""(\d+)[×x](\d+)""").find(text)
-
-                val s = if (isTrailerRow) 0 else if (isMovie) null else (matchSE?.groupValues?.get(1)?.toIntOrNull() ?: 1)
-                val e = if (isTrailerRow) 0 else if (isMovie) null else (matchSE?.groupValues?.get(2)?.toIntOrNull() ?: absoluteEpCounter)
+                val s = if (isMovie) null else (matchSE?.groupValues?.get(1)?.toIntOrNull() ?: 1)
+                val e = if (isMovie) null else (matchSE?.groupValues?.get(2)?.toIntOrNull() ?: absoluteEpCounter)
 
                 val dataUrls = validLinks.joinToString("###")
                 
@@ -150,9 +141,10 @@ class ToonItaliaProvider : MainAPI() {
                     this.name = epName
                     this.season = s
                     this.episode = e
+                    this.posterUrl = poster // FIX: Ripristina le miniature degli episodi
                 })
 
-                if (!isMovie && !isTrailerRow && matchSE == null) absoluteEpCounter++ 
+                if (!isMovie && matchSE == null) absoluteEpCounter++ 
             }
         }
 
@@ -160,11 +152,13 @@ class ToonItaliaProvider : MainAPI() {
             newMovieLoadResponse(title, url, TvType.Movie, episodes.firstOrNull()?.data ?: "") {
                 this.posterUrl = poster
                 this.plot = plot
+                this.posterHeaders = commonHeaders
             }
         } else {
             newTvSeriesLoadResponse(title, url, tvType, episodes) {
                 this.posterUrl = poster
                 this.plot = plot
+                this.posterHeaders = commonHeaders
             }
         }
     }
@@ -176,9 +170,8 @@ class ToonItaliaProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         data.split("###").forEach { url ->
-            // fixHostUrl indirizza i link verso i nuovi estrattori Ryderjet e VidHideHub
             loadExtractor(fixHostUrl(url), subtitleCallback, callback)
         }
         return true
     }
-}       
+}
