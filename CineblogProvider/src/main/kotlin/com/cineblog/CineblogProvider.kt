@@ -6,7 +6,7 @@ import com.lagradost.cloudstream3.utils.loadExtractor
 import org.jsoup.nodes.Element
 
 class CineblogProvider : MainAPI() {
-    override var mainUrl = "https://cineblog001.pics"
+    override var mainUrl = "https://cineblog001.autos/"
     override var name = "Cineblog01"
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
     override var lang = "it"
