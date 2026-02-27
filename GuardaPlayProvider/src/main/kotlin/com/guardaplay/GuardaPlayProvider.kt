@@ -33,8 +33,8 @@ class GuardaPlayProvider : MainAPI() {
         val response = app.get(url, headers = headers)
         val document = response.document
         
-        // Selettore per i contenitori dei film (tipici di Dooplay)
-        val items = document.select("article.item, .posts .item, .items .item").mapNotNull { 
+        // Selettore specifico per la struttura post/article che hai inviato
+        val items = document.select("li[id^=post-], article.post, .item").mapNotNull { 
             it.toSearchResult() 
         }
         
@@ -42,25 +42,29 @@ class GuardaPlayProvider : MainAPI() {
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        // 1. Estrazione URL: Priorità al link 'lnk-blk' che copre la card
+        // 1. URL: Cerchiamo la classe lnk-blk che hai indicato
         val href = this.selectFirst("a.lnk-blk")?.attr("href") 
             ?: this.selectFirst("a")?.attr("href") 
             ?: return null
 
-        // 2. Estrazione Titolo: Cerca nell'entry-title o dall'alt dell'immagine
-        val img = this.selectFirst("img")
-        val title = this.selectFirst(".entry-title, .title, h3, h2")?.text()?.trim()
-            ?: img?.attr("alt")?.replace("Image ", "") 
-            ?: "Senza Titolo"
+        // 2. TITOLO: Dallo snippet si vede h2.entry-title
+        val title = this.selectFirst("h2.entry-title")?.text()?.trim()
+            ?: this.selectFirst("img")?.attr("alt")?.replace("Image ", "")
+            ?: return null
         
-        // 3. Immagine: Gestione URL relativi //image.tmdb.org...
+        // 3. POSTER: Gestione TMDB //
+        val img = this.selectFirst("img")
         val posterUrl = img?.let { 
-            val src = it.attr("data-src").ifEmpty { it.attr("src") }
+            val src = it.attr("src").ifEmpty { it.attr("data-src") }
             if (src.startsWith("//")) "https:$src" else src
         }
 
+        // 4. ANNO: Estratto dallo span.year
+        val year = this.selectFirst("span.year")?.text()?.trim()?.toIntOrNull()
+
         return newMovieSearchResponse(title, href, TvType.Movie) {
             this.posterUrl = posterUrl
+            this.year = year
         }
     }
 
@@ -68,7 +72,7 @@ class GuardaPlayProvider : MainAPI() {
         val searchUrl = "$mainUrl/?s=$query"
         val document = app.get(searchUrl, headers = headers).document
         
-        return document.select("article.item, .item").mapNotNull { 
+        return document.select("article.post, .item").mapNotNull { 
             it.toSearchResult() 
         }
     }
@@ -76,13 +80,13 @@ class GuardaPlayProvider : MainAPI() {
     override suspend fun load(url: String): LoadResponse {
         val document = app.get(url, headers = headers).document
         
-        val title = document.selectFirst("h1.entry-title, .data h1")?.text()?.trim() ?: ""
-        val poster = document.selectFirst(".poster img")?.let { img ->
-            val src = img.attr("data-src").ifEmpty { img.attr("src") }
+        val title = document.selectFirst("h1.entry-title, h2.entry-title")?.text()?.trim() ?: ""
+        val poster = document.selectFirst(".post-thumbnail img, .poster img")?.let { img ->
+            val src = img.attr("src").ifEmpty { img.attr("data-src") }
             if (src.startsWith("//")) "https:$src" else src
         }
-        val plot = document.selectFirst(".description p, #info p, .wp-content p")?.text()
-        val year = document.selectFirst(".date, .release-date, .year")?.text()?.trim()?.let { 
+        val plot = document.selectFirst(".description p, .entry-content p")?.text()
+        val year = document.selectFirst("span.year, .date")?.text()?.trim()?.let { 
             Regex("\\d{4}").find(it)?.value?.toIntOrNull() 
         }
 
@@ -111,17 +115,17 @@ class GuardaPlayProvider : MainAPI() {
             }
         }
 
-        // Link diretti HLS (m3u8)
+        // Link diretti
         val directVideoRegex = Regex("""https?://[^\s"'<>]+(?:\.txt|\.m3u8)""")
         directVideoRegex.findAll(html).forEach { match ->
             val videoUrl = match.value
             if (videoUrl.contains(Regex("master|playlist|index|cf-master"))) {
                 callback.invoke(
                     newExtractorLink(
-                        source = this.name,
-                        name = "GuardaPlay Direct",
-                        url = videoUrl,
-                        type = if (videoUrl.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                        this.name,
+                        "GuardaPlay Direct",
+                        videoUrl,
+                        if (videoUrl.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
                     ) {
                         this.referer = "$mainUrl/"
                         this.quality = Qualities.P1080.value
@@ -130,11 +134,11 @@ class GuardaPlayProvider : MainAPI() {
             }
         }
 
-        // Host comuni
+        // Scansione host comuni
         val hostRegex = Regex("""https?://[^\s"'<>]+""")
         hostRegex.findAll(html).forEach { match ->
             val foundUrl = match.value
-            if (foundUrl.contains(Regex("vidhide|voe|streamwish|mixdrop|filemoon|ryderjet|hub"))) {
+            if (foundUrl.contains(Regex("vidhide|voe|streamwish|mixdrop|filemoon|ryderjet|hub|player"))) {
                 loadExtractor(foundUrl, subtitleCallback, callback)
             }
         }
