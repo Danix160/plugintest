@@ -87,19 +87,19 @@ class GuardaPlayProvider : MainAPI() {
             }
         }
 
-        // 2. Link diretti HLS (.txt o .m3u8) - VERSIONE COMPATIBILE STABLE
+        // 2. Link diretti HLS - Utilizzo di newExtractorLink per evitare deprecation error
         val directVideoRegex = Regex("""https?://[^\s"'<>]+(?:\.txt|\.m3u8)""")
         directVideoRegex.findAll(html).forEach { match ->
             val videoUrl = match.value
             if (videoUrl.contains(Regex("master|playlist|index|cf-master"))) {
                 callback.invoke(
-                    ExtractorLink(
-                        this.name,
-                        "GuardaPlay Direct",
-                        videoUrl,
-                        "$mainUrl/",
-                        Qualities.Unknown.value,
-                        true // Questo è il booleano per isM3u8 nella versione Stable
+                    newExtractorLink(
+                        source = this.name,
+                        name = "GuardaPlay Direct",
+                        url = videoUrl,
+                        referer = "$mainUrl/",
+                        quality = Qualities.Unknown.value,
+                        isM3u8 = true
                     )
                 )
             }
