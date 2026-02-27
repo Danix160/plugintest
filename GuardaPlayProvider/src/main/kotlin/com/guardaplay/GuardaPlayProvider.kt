@@ -79,7 +79,7 @@ class GuardaPlayProvider : MainAPI() {
         val document = response.document
         val html = response.text
 
-        // 1. Estrazione Iframe
+        // 1. Estrazione Iframe standard
         document.select("iframe").forEach { iframe ->
             val src = iframe.attr("src")
             if (src.isNotEmpty() && !src.contains("youtube") && !src.contains("google")) {
@@ -87,25 +87,26 @@ class GuardaPlayProvider : MainAPI() {
             }
         }
 
-        // 2. Link diretti HLS (m3u8) - Utilizzo di newExtractorLink (Helper aggiornato)
+        // 2. Link diretti HLS (m3u8) 
+        // Usiamo i parametri posizionali per evitare errori "No parameter with name found"
         val directVideoRegex = Regex("""https?://[^\s"'<>]+(?:\.txt|\.m3u8)""")
         directVideoRegex.findAll(html).forEach { match ->
             val videoUrl = match.value
             if (videoUrl.contains(Regex("master|playlist|index|cf-master"))) {
                 callback.invoke(
                     newExtractorLink(
-                        source = this.name,
-                        name = "GuardaPlay Direct",
-                        url = videoUrl,
-                        referer = "$mainUrl/",
-                        quality = Qualities.P1080.value,
-                        type = if (videoUrl.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                        this.name,          // source
+                        "GuardaPlay Direct",// name
+                        videoUrl,           // url
+                        "$mainUrl/",        // referer
+                        Qualities.P1080.value, // quality
+                        videoUrl.contains(".m3u8") // isM3u8
                     )
                 )
             }
         }
 
-        // 3. Scansione host comuni
+        // 3. Scansione host comuni (Vidhide, Voe, ecc.)
         val hostRegex = Regex("""https?://[^\s"'<>]+""")
         hostRegex.findAll(html).forEach { match ->
             val foundUrl = match.value
