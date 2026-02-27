@@ -87,26 +87,26 @@ class GuardaPlayProvider : MainAPI() {
             }
         }
 
-        // 2. Cerca link diretti HLS camuffati (.txt o .m3u8)
-        // Questo cattura il link "bluehaveninteractive" che hai inviato
+        // 2. Cerca link diretti HLS (.txt o .m3u8) - FIX DEPRECATION QUI
         val directVideoRegex = Regex("""https?://[^\s"'<>]+(?:\.txt|\.m3u8)""")
         directVideoRegex.findAll(html).forEach { match ->
             val videoUrl = match.value
             if (videoUrl.contains(Regex("master|playlist|index|cf-master"))) {
                 callback.invoke(
                     ExtractorLink(
-                        this.name,
-                        "GuardaPlay Direct",
-                        videoUrl,
+                        source = this.name,
+                        name = "GuardaPlay Direct",
+                        url = videoUrl,
                         referer = "$mainUrl/",
                         quality = Qualities.Unknown.value,
-                        isM3u8 = true
+                        isM3u8 = true,
+                        // Utilizziamo i parametri con nome per sicurezza con le nuove versioni
                     )
                 )
             }
         }
 
-        // 3. Scansione classica degli script per i video host supportati
+        // 3. Scansione host supportati
         val hostRegex = Regex("""https?://[^\s"'<>]+""")
         hostRegex.findAll(html).forEach { match ->
             val foundUrl = match.value
