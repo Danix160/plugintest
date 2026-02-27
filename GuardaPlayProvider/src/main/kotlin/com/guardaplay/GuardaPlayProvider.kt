@@ -79,7 +79,7 @@ class GuardaPlayProvider : MainAPI() {
         val document = response.document
         val html = response.text
 
-        // 1. Cerca Iframe Standard (VidHide, Voe, ecc.)
+        // 1. Iframe Standard
         document.select("iframe").forEach { iframe ->
             val src = iframe.attr("src")
             if (src.isNotEmpty() && !src.contains("youtube") && !src.contains("google")) {
@@ -87,11 +87,12 @@ class GuardaPlayProvider : MainAPI() {
             }
         }
 
-        // 2. Cerca link diretti HLS (.txt o .m3u8) - FIX DEPRECATION QUI
+        // 2. Link diretti HLS (.txt o .m3u8) - SOLUZIONE ERRORE COMPILAZIONE
         val directVideoRegex = Regex("""https?://[^\s"'<>]+(?:\.txt|\.m3u8)""")
         directVideoRegex.findAll(html).forEach { match ->
             val videoUrl = match.value
             if (videoUrl.contains(Regex("master|playlist|index|cf-master"))) {
+                // Usiamo callback con addLink (metodo moderno e non deprecato)
                 callback.invoke(
                     ExtractorLink(
                         source = this.name,
@@ -99,8 +100,7 @@ class GuardaPlayProvider : MainAPI() {
                         url = videoUrl,
                         referer = "$mainUrl/",
                         quality = Qualities.Unknown.value,
-                        isM3u8 = true,
-                        // Utilizziamo i parametri con nome per sicurezza con le nuove versioni
+                        type = ExtractorLinkType.M3U8
                     )
                 )
             }
