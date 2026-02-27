@@ -11,7 +11,7 @@
 
 ### Plugin
 Questi sono i plugin disponibili al momento
-| **Nome**           | **Sito**                                               |            **Categorie**            | **Lingua** | **Funzionante** | **Note**                                                                                                                                                                                                 |
+| **Nome**           | **Sito**                                               |            **Categorie**            | **Lingua** | **Funzionante** | **Note**|                                                                                                                  
 |--------------------|--------------------------------------------------------|:-----------------------------------:|:----------:|:---------------:|-------------------------------------------------------------|
 |CB01                | https://cb01uno.live/                                  | Film, TV Show, Cartoni, Anime       |    🇮🇹    |        ✅         | Serie TV non funzionanti al 100%, utilizzare solo con i film|
 | Cineblog           | https://cineblog001.club/                              | Film, TV Show, Cartoni              |    🇮🇹    |        ✅         |                                                                                                                             
