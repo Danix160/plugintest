@@ -18,6 +18,3 @@ Questi sono i plugin disponibili al momento
 | ToonItalia         | https://toonitalia.xyz/                                | Anime, Cartoni, Film, Serie TV      |    🇮🇹    |        ✅         |    
 ---
 
-### Istruzioni Manuali
-Se il tasto sopra non funziona, copia e incolla questo link nelle impostazioni di Cloudstream:
-`https://raw.githubusercontent.com/Danix160/Danix-Repository/builds/plugins.json`
