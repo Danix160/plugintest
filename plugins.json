@@ -2,7 +2,7 @@
     {
         "iconUrl": "https://cb01uno.one/wp-content/uploads/2026/01/logo-official-uno-2026.png",
         "apiVersion": 1,
-        "repositoryUrl": "https://github.com/Danix160/plugintest",
+        "repositoryUrl": "https://github.com/Danix160/Danix-Repository",
         "fileSize": 22359,
         "status": 1,
         "language": "it",
@@ -17,13 +17,13 @@
         "version": 20,
         "internalName": "CbProvider",
         "description": "cb01uno.one",
-        "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/CbProvider.cs3",
+        "url": "https://raw.githubusercontent.com/Danix160/Danix-Repository/builds/CbProvider.cs3",
         "name": "CbProvider"
     },
     {
         "iconUrl": "https://cineblog001.club/templates/CB01/img/logo.png",
         "apiVersion": 1,
-        "repositoryUrl": "https://github.com/Danix160/plugintest",
+        "repositoryUrl": "https://github.com/Danix160/Danix-Repository",
         "fileSize": 14373,
         "status": 1,
         "language": "it",
@@ -37,13 +37,13 @@
         "version": 59,
         "internalName": "CineblogProvider",
         "description": "cineblog001.club",
-        "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/CineblogProvider.cs3",
+        "url": "https://raw.githubusercontent.com/Danix160/Danix-Repository/builds/CineblogProvider.cs3",
         "name": "CineblogProvider"
     },
     {
         "iconUrl": "https://toonitalia.xyz/wp-content/uploads/2023/08/cropped-Majintoon-192x192.jpg",
         "apiVersion": 1,
-        "repositoryUrl": "https://github.com/Danix160/plugintest",
+        "repositoryUrl": "https://github.com/Danix160/Danix-Repository",
         "status": 1,
         "language": "it",
         "authors": [
@@ -58,7 +58,7 @@
         "version": 60,
         "internalName": "ToonItaliaProvider",
         "description": "Archivio di Anime e Cartoni animati in italiano da ToonItalia.xyz",
-        "url": "https://raw.githubusercontent.com/Danix160/plugintest/builds/ToonItaliaProvider.cs3",
+        "url": "https://raw.githubusercontent.com/Danix160/Danix-Repository/builds/ToonItaliaProvider.cs3",
         "name": "ToonItaliaProvider"
     }
 ]
