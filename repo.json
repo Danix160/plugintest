@@ -1,7 +1,7 @@
 {
   "name": "Danix Repository",
-  "iconUrl": "https://raw.githubusercontent.com/Danix160/plugintest/master/gum.png",
-  "description": "Repository Personale",
+  "iconUrl": "https://raw.githubusercontent.com/Danix160/Danix-Repository/master/gum.png",
+  "description": "Repository Cloudstream con Addon Italiani",
   "manifestVersion": 1,
   "pluginLists": [
     "https://raw.githubusercontent.com/Danix160/Danix-Repository/builds/plugins.json"
