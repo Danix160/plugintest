@@ -87,22 +87,20 @@ class GuardaPlayProvider : MainAPI() {
             }
         }
 
-        // 2. Link diretti HLS - Corretto per la firma specifica del compilatore
+        // 2. Link diretti HLS - Utilizzo del costruttore diretto per evitare errori di 'val' reassignment
         val directVideoRegex = Regex("""https?://[^\s"'<>]+(?:\.txt|\.m3u8)""")
         directVideoRegex.findAll(html).forEach { match ->
             val videoUrl = match.value
             if (videoUrl.contains(Regex("master|playlist|index|cf-master"))) {
                 callback.invoke(
-                    newExtractorLink(
-                        this.name,
-                        "GuardaPlay Direct",
-                        videoUrl
-                    ) {
-                        // Impostiamo referer e proprietà HLS qui dentro per evitare errori di firma
-                        this.referer = "$mainUrl/"
-                        this.quality = Qualities.Unknown.value
-                        this.isM3u8 = true
-                    }
+                    ExtractorLink(
+                        source = this.name,
+                        name = "GuardaPlay Direct",
+                        url = videoUrl,
+                        referer = "$mainUrl/",
+                        quality = Qualities.Unknown.value,
+                        isM3u8 = true
+                    )
                 )
             }
         }
