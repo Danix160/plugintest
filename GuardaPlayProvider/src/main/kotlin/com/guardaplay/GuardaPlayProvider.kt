@@ -76,10 +76,10 @@ class GuardaPlayProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val response = app.get(data, headers = headers)
-        val document = response.document
         val html = response.text
+        val document = response.document
 
-        // 1. Estrazione Iframe standard
+        // 1. Estrazione Iframe
         document.select("iframe").forEach { iframe ->
             val src = iframe.attr("src")
             if (src.isNotEmpty() && !src.contains("youtube") && !src.contains("google")) {
@@ -87,26 +87,26 @@ class GuardaPlayProvider : MainAPI() {
             }
         }
 
-        // 2. Link diretti HLS (m3u8) 
-        // Usiamo i parametri posizionali per evitare errori "No parameter with name found"
+        // 2. Link diretti HLS (m3u8) - Corretto per la firma specifica del compilatore
         val directVideoRegex = Regex("""https?://[^\s"'<>]+(?:\.txt|\.m3u8)""")
         directVideoRegex.findAll(html).forEach { match ->
             val videoUrl = match.value
             if (videoUrl.contains(Regex("master|playlist|index|cf-master"))) {
                 callback.invoke(
                     newExtractorLink(
-                        this.name,          // source
-                        "GuardaPlay Direct",// name
-                        videoUrl,           // url
-                        "$mainUrl/",        // referer
-                        Qualities.P1080.value, // quality
-                        videoUrl.contains(".m3u8") // isM3u8
-                    )
+                        this.name,
+                        "GuardaPlay Direct",
+                        videoUrl,
+                        if (videoUrl.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                    ) {
+                        this.referer = "$mainUrl/"
+                        this.quality = Qualities.P1080.value
+                    }
                 )
             }
         }
 
-        // 3. Scansione host comuni (Vidhide, Voe, ecc.)
+        // 3. Scansione host comuni
         val hostRegex = Regex("""https?://[^\s"'<>]+""")
         hostRegex.findAll(html).forEach { match ->
             val foundUrl = match.value
