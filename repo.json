@@ -4,6 +4,6 @@
   "description": "Repository Personale",
   "manifestVersion": 1,
   "pluginLists": [
-    "https://raw.githubusercontent.com/Danix160/plugintest/builds/plugins.json"
+    "https://raw.githubusercontent.com/Danix160/Danix-Repository/builds/plugins.json"
   ]
 }
