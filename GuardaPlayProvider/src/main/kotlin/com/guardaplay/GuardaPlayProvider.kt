@@ -93,14 +93,15 @@ class GuardaPlayProvider : MainAPI() {
             val videoUrl = match.value
             if (videoUrl.contains(Regex("master|playlist|index|cf-master"))) {
                 callback.invoke(
-                    ExtractorLink(
+                    newExtractorLink(
                         this.name,
-                        "GuardaPlay Direct",
-                        videoUrl,
-                        "$mainUrl/",
-                        Qualities.Unknown.value,
-                        true
-                    )
+                        this.name,
+                        finalUrl,
+                        if (finalUrl.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                    ) {
+                        this.quality = Qualities.P1080.value
+                        this.referer = url
+                    }
                 )
             }
         }
