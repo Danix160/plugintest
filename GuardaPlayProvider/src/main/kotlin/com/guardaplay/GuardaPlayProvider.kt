@@ -33,8 +33,11 @@ class GuardaPlayProvider : MainAPI() {
         val response = app.get(url, headers = headers)
         val document = response.document
         
-        // Selettore specifico per la struttura post/article che hai inviato
-        val items = document.select("li[id^=post-], article.post, .item").mapNotNull { 
+        // Selettore mirato: prendiamo solo i LI che iniziano con post-
+        // Se non trova nulla (es. in altre pagine), prova article.post ma evita di prenderli entrambi
+        val items = document.select("li[id^=post-]").ifEmpty { 
+            document.select("article.post") 
+        }.mapNotNull { 
             it.toSearchResult() 
         }
         
@@ -42,24 +45,24 @@ class GuardaPlayProvider : MainAPI() {
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        // 1. URL: Cerchiamo la classe lnk-blk che hai indicato
+        // 1. URL: Cerchiamo la classe lnk-blk
         val href = this.selectFirst("a.lnk-blk")?.attr("href") 
             ?: this.selectFirst("a")?.attr("href") 
             ?: return null
 
-        // 2. TITOLO: Dallo snippet si vede h2.entry-title
+        // 2. TITOLO: Cerchiamo h2.entry-title
         val title = this.selectFirst("h2.entry-title")?.text()?.trim()
             ?: this.selectFirst("img")?.attr("alt")?.replace("Image ", "")
             ?: return null
         
-        // 3. POSTER: Gestione TMDB //
+        // 3. POSTER: Gestione protocollo relativo //
         val img = this.selectFirst("img")
         val posterUrl = img?.let { 
             val src = it.attr("src").ifEmpty { it.attr("data-src") }
             if (src.startsWith("//")) "https:$src" else src
         }
 
-        // 4. ANNO: Estratto dallo span.year
+        // 4. ANNO
         val year = this.selectFirst("span.year")?.text()?.trim()?.toIntOrNull()
 
         return newMovieSearchResponse(title, href, TvType.Movie) {
@@ -72,7 +75,10 @@ class GuardaPlayProvider : MainAPI() {
         val searchUrl = "$mainUrl/?s=$query"
         val document = app.get(searchUrl, headers = headers).document
         
-        return document.select("article.post, .item").mapNotNull { 
+        // Anche qui, filtro per evitare duplicati
+        return document.select("li[id^=post-]").ifEmpty { 
+            document.select("article.post") 
+        }.mapNotNull { 
             it.toSearchResult() 
         }
     }
@@ -134,7 +140,7 @@ class GuardaPlayProvider : MainAPI() {
             }
         }
 
-        // Scansione host comuni
+        // Host comuni
         val hostRegex = Regex("""https?://[^\s"'<>]+""")
         hostRegex.findAll(html).forEach { match ->
             val foundUrl = match.value
