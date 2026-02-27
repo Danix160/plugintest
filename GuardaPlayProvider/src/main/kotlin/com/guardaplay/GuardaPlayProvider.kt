@@ -79,7 +79,7 @@ class GuardaPlayProvider : MainAPI() {
         val document = response.document
         val html = response.text
 
-        // 1. Iframe Standard
+        // 1. Estrazione Iframe (Vidhide, Streamwish, ecc.)
         document.select("iframe").forEach { iframe ->
             val src = iframe.attr("src")
             if (src.isNotEmpty() && !src.contains("youtube") && !src.contains("google")) {
@@ -87,25 +87,25 @@ class GuardaPlayProvider : MainAPI() {
             }
         }
 
-        // 2. Link diretti HLS - Utilizzo di newExtractorLink per evitare deprecation error
+        // 2. Link diretti HLS (.m3u8) - Sintassi posizionale per massima compatibilità
         val directVideoRegex = Regex("""https?://[^\s"'<>]+(?:\.txt|\.m3u8)""")
         directVideoRegex.findAll(html).forEach { match ->
             val videoUrl = match.value
             if (videoUrl.contains(Regex("master|playlist|index|cf-master"))) {
                 callback.invoke(
                     newExtractorLink(
-                        source = this.name,
-                        name = "GuardaPlay Direct",
-                        url = videoUrl,
-                        referer = "$mainUrl/",
-                        quality = Qualities.Unknown.value,
-                        isM3u8 = true
+                        this.name,               // source (nome del provider)
+                        "GuardaPlay Direct",      // name (nome del link)
+                        videoUrl,                // url (indirizzo video)
+                        "$mainUrl/",             // referer
+                        Qualities.Unknown.value,  // quality
+                        true                     // isM3u8 (Booleano)
                     )
                 )
             }
         }
 
-        // 3. Scansione host supportati
+        // 3. Scansione regex per altri host comuni
         val hostRegex = Regex("""https?://[^\s"'<>]+""")
         hostRegex.findAll(html).forEach { match ->
             val foundUrl = match.value
