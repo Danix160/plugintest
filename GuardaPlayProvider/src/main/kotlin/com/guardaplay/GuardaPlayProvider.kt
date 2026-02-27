@@ -79,7 +79,7 @@ class GuardaPlayProvider : MainAPI() {
         val document = response.document
         val html = response.text
 
-        // 1. Estrazione Iframe
+        // 1. Estrazione Iframe (Vidhide, Streamwish, ecc.)
         document.select("iframe").forEach { iframe ->
             val src = iframe.attr("src")
             if (src.isNotEmpty() && !src.contains("youtube") && !src.contains("google")) {
@@ -87,26 +87,26 @@ class GuardaPlayProvider : MainAPI() {
             }
         }
 
-        // 2. Link diretti HLS - Corretto per evitare errori di parametri mancanti
+        // 2. Link diretti HLS (m3u8) estratti tramite Regex
         val directVideoRegex = Regex("""https?://[^\s"'<>]+(?:\.txt|\.m3u8)""")
         directVideoRegex.findAll(html).forEach { match ->
             val videoUrl = match.value
+            // Filtra solo i link che sembrano playlist video reali
             if (videoUrl.contains(Regex("master|playlist|index|cf-master"))) {
                 callback.invoke(
-                    newExtractorLink(
-                        this.name,
-                        this.name,
-                        finalUrl,
-                        if (finalUrl.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
-                    ) {
-                        this.quality = Qualities.P1080.value
-                        this.referer = url
-                    }
+                    ExtractorLink(
+                        source = this.name,
+                        name = "GuardaPlay Direct",
+                        url = videoUrl,
+                        referer = "$mainUrl/",
+                        quality = Qualities.P1080.value,
+                        isM3u8 = videoUrl.contains(".m3u8")
+                    )
                 )
             }
         }
 
-        // 3. Scansione host comuni
+        // 3. Scansione manuale di URL che potrebbero non essere in iframe
         val hostRegex = Regex("""https?://[^\s"'<>]+""")
         hostRegex.findAll(html).forEach { match ->
             val foundUrl = match.value
