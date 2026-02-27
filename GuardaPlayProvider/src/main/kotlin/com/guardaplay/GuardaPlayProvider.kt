@@ -33,36 +33,31 @@ class GuardaPlayProvider : MainAPI() {
         val response = app.get(url, headers = headers)
         val document = response.document
         
-        // Selettore mirato: prendiamo solo i LI che iniziano con post-
-        // Se non trova nulla (es. in altre pagine), prova article.post ma evita di prenderli entrambi
+        // Evita duplicati: prendi solo i 'li' se presenti, altrimenti gli 'article'
         val items = document.select("li[id^=post-]").ifEmpty { 
             document.select("article.post") 
         }.mapNotNull { 
             it.toSearchResult() 
         }
         
-        return newHomePageResponse(request.name, items)
+        return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        // 1. URL: Cerchiamo la classe lnk-blk
         val href = this.selectFirst("a.lnk-blk")?.attr("href") 
             ?: this.selectFirst("a")?.attr("href") 
             ?: return null
 
-        // 2. TITOLO: Cerchiamo h2.entry-title
         val title = this.selectFirst("h2.entry-title")?.text()?.trim()
             ?: this.selectFirst("img")?.attr("alt")?.replace("Image ", "")
             ?: return null
         
-        // 3. POSTER: Gestione protocollo relativo //
         val img = this.selectFirst("img")
         val posterUrl = img?.let { 
             val src = it.attr("src").ifEmpty { it.attr("data-src") }
             if (src.startsWith("//")) "https:$src" else src
         }
 
-        // 4. ANNO
         val year = this.selectFirst("span.year")?.text()?.trim()?.toIntOrNull()
 
         return newMovieSearchResponse(title, href, TvType.Movie) {
@@ -75,10 +70,7 @@ class GuardaPlayProvider : MainAPI() {
         val searchUrl = "$mainUrl/?s=$query"
         val document = app.get(searchUrl, headers = headers).document
         
-        // Anche qui, filtro per evitare duplicati
-        return document.select("li[id^=post-]").ifEmpty { 
-            document.select("article.post") 
-        }.mapNotNull { 
+        return document.select("li[id^=post-], article.post").mapNotNull { 
             it.toSearchResult() 
         }
     }
@@ -111,44 +103,66 @@ class GuardaPlayProvider : MainAPI() {
     ): Boolean {
         val response = app.get(data, headers = headers)
         val html = response.text
-        val document = response.document
 
-        // Estrazione Iframe
+        // 1. Ricerca Iframe (Loadm, Vood, etc.)
+        val document = response.document
         document.select("iframe").forEach { iframe ->
             val src = iframe.attr("src")
-            if (src.isNotEmpty() && !src.contains("youtube") && !src.contains("google")) {
+            if (src.contains("loadm.cam") || src.contains("vood.xyz")) {
+                processLoadm(src, callback)
+            } else if (src.isNotEmpty() && !src.contains("google") && !src.contains("youtube")) {
                 loadExtractor(src, subtitleCallback, callback)
             }
         }
 
-        // Link diretti
-        val directVideoRegex = Regex("""https?://[^\s"'<>]+(?:\.txt|\.m3u8)""")
-        directVideoRegex.findAll(html).forEach { match ->
-            val videoUrl = match.value
-            if (videoUrl.contains(Regex("master|playlist|index|cf-master"))) {
-                callback.invoke(
-                    newExtractorLink(
-                        this.name,
-                        "GuardaPlay Direct",
-                        videoUrl,
-                        if (videoUrl.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
-                    ) {
-                        this.referer = "$mainUrl/"
-                        this.quality = Qualities.P1080.value
-                    }
-                )
-            }
-        }
-
-        // Host comuni
-        val hostRegex = Regex("""https?://[^\s"'<>]+""")
-        hostRegex.findAll(html).forEach { match ->
-            val foundUrl = match.value
-            if (foundUrl.contains(Regex("vidhide|voe|streamwish|mixdrop|filemoon|ryderjet|hub|player"))) {
-                loadExtractor(foundUrl, subtitleCallback, callback)
+        // 2. Ricerca Link nei sorgenti JS (per SPA)
+        val regex = Regex("""https?://(?:vidhide|voe|streamwish|mixdrop|filemoon|ryderjet|loadm|vood)[^\s"'<>\\\/]+""")
+        regex.findAll(html).forEach { match ->
+            val url = match.value.replace("\\/", "/")
+            if (url.contains("loadm.cam")) {
+                processLoadm(url, callback)
+            } else {
+                loadExtractor(url, subtitleCallback, callback)
             }
         }
 
         return true
+    }
+
+    private suspend fun processLoadm(url: String, callback: (ExtractorLink) -> Unit) {
+        // Estraiamo l'ID dall'URL (es: id=61illa)
+        val videoId = Regex("""id=([a-zA-Z0-9]+)""").find(url)?.groupValues?.get(1) ?: return
+        
+        // Simuliamo la chiamata API trovata nel file HAR
+        val apiUrl = "https://loadm.cam/api/v1/video?id=$videoId&r=guardaplay.space"
+        
+        try {
+            val apiRes = app.get(apiUrl, headers = mapOf(
+                "Referer" to "https://loadm.cam/",
+                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                "Accept" to "*/*"
+            ))
+
+            // L'API di loadm spesso restituisce direttamente il file m3u8 o un JSON
+            // Cerchiamo URL m3u8 o mp4 nella risposta
+            val body = apiRes.text
+            val videoUrl = Regex("""https?://[^\s"'<>]+(?:\.m3u8|\.mp4)""").find(body)?.value
+            
+            if (videoUrl != null) {
+                callback.invoke(
+                    newExtractorLink(
+                        "LoadM",
+                        "LoadM - Guardaplay",
+                        videoUrl,
+                        if (videoUrl.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                    ) {
+                        this.quality = Qualities.P1080.value
+                        this.referer = "https://loadm.cam/"
+                    }
+                )
+            }
+        } catch (e: Exception) {
+            // Log errore opzionale
+        }
     }
 }
