@@ -87,21 +87,19 @@ class GuardaPlayProvider : MainAPI() {
             }
         }
 
-        // 2. Link diretti HLS - Sintassi universale compatibile con le restrizioni CI/CD
+        // 2. Link diretti HLS - Corretto per evitare errori di parametri mancanti
         val directVideoRegex = Regex("""https?://[^\s"'<>]+(?:\.txt|\.m3u8)""")
         directVideoRegex.findAll(html).forEach { match ->
             val videoUrl = match.value
             if (videoUrl.contains(Regex("master|playlist|index|cf-master"))) {
-                // Usiamo newExtractorLink ma passiamo SOLO i parametri obbligatori posizionali
-                // e configuriamo il resto in modo da non causare warning o errori di riassegnazione
                 callback.invoke(
-                    newExtractorLink(
+                    ExtractorLink(
                         this.name,
                         "GuardaPlay Direct",
                         videoUrl,
-                        referer = "$mainUrl/",
-                        quality = Qualities.Unknown.value,
-                        isM3u8 = true
+                        "$mainUrl/",
+                        Qualities.Unknown.value,
+                        true
                     )
                 )
             }
