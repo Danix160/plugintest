@@ -12,7 +12,7 @@ class GuardaPlayProvider : MainAPI() {
     override var lang = "it"
     override val hasMainPage = true
 
-    private val clientUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    private val clientUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
     override val mainPage = mainPageOf(
         "$mainUrl/" to "Ultimi Film",
@@ -64,58 +64,68 @@ class GuardaPlayProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val response = app.get(data, headers = mapOf("User-Agent" to clientUserAgent))
-        val document = response.document
+        val document = app.get(data).document
 
-        // 1. Analisi Iframe e Embed
-        document.select("iframe, div[data-src], div[data-litespeed-src], .dooplay_player_option").forEach { element ->
-            var src = element.attr("src")
-                .ifEmpty { element.attr("data-src") }
-                .ifEmpty { element.attr("data-litespeed-src") }
-                .ifEmpty { element.attr("data-url") }
+        // Estrazione Opzioni Player (DooPlay style)
+        document.select(".dooplay_player_option").forEach { option ->
+            val post = option.attr("data-post")
+            val nume = option.attr("data-nume")
+            val type = option.attr("data-type")
 
-            if (src.isBlank()) return@forEach
-            if (src.startsWith("//")) src = "https:$src"
-            if (src.startsWith("/")) src = mainUrl + src
-
-            // Caso Embed Interno (quello che abbiamo visto nel log)
-            if (src.contains("trembed")) {
-                try {
-                    val innerPage = app.get(src, referer = data).document
-                    val innerIframe = innerPage.selectFirst("iframe")?.attr("src")
-                    if (innerIframe != null) {
-                        val finalUrl = if (innerIframe.startsWith("//")) "https:$innerIframe" else innerIframe
-                        processFinalUrl(finalUrl, src, callback)
-                    }
-                } catch (e: Exception) {
-                    Log.e("GuardaPlay", "Errore embed: ${e.message}")
+            if (post.isNotBlank()) {
+                val res = app.post(
+                    "$mainUrl/wp-admin/admin-ajax.php",
+                    data = mapOf("action" to "doo_player_ajax", "post" to post, "nume" to nume, "type" to type),
+                    referer = data,
+                    headers = mapOf("X-Requested-With" to "XMLHttpRequest")
+                ).document
+                
+                val src = res.selectFirst("iframe")?.attr("src") ?: res.text().let {
+                    // Cerca URL nel testo se non c'è iframe (a volte è codificato in JSON)
+                    Regex("""https?://[^\s"']+""").find(it)?.value
                 }
-            } else {
+
+                src?.let { processFinalUrl(it, data, callback) }
+            }
+        }
+
+        // Fallback: cerca iframe standard
+        document.select("iframe").forEach { 
+            val src = it.attr("src")
+            if (src.isNotBlank() && !src.contains("google")) {
                 processFinalUrl(src, data, callback)
             }
         }
+
         return true
     }
 
     private suspend fun processFinalUrl(url: String, referer: String, callback: (ExtractorLink) -> Unit) {
-        Log.d("GuardaPlay", "Processo URL finale: $url")
-        
-        // Se è LoadM o Pancast, dobbiamo scavare per l'M3U8
-        if (url.contains("loadm.cam") || url.contains("pancast.net")) {
-            val res = app.get(url, referer = referer).text
-            val m3u8Regex = Regex("""(https?.*?\.m3u8.*?)["']""")
-            m3u8Regex.findAll(res).forEach { match ->
-                val videoUrl = match.groupValues[1].replace("\\/", "/")
+        var cleanUrl = if (url.startsWith("//")) "https:$url" else url
+        Log.d("GuardaPlay", "Analisi URL: $cleanUrl")
+
+        if (cleanUrl.contains("loadm.cam") || cleanUrl.contains("pancast.net")) {
+            // LoadM richiede spesso un trucco: il file video è caricato via AJAX o ha lo stesso ID dell'hash
+            val pageText = app.get(cleanUrl, referer = referer).text
+            
+            // Proviamo a cercare pattern m3u8 o variabili file/sources
+            val videoRegex = Regex("""(file|source|src)\s*[:=]\s*["'](https?://[^"']+\.m3u8[^"']*)["']""")
+            val match = videoRegex.find(pageText)
+            
+            if (match != null) {
                 callback.invoke(
-                    newExtractorLink("GuardaPlay", "Server HD", videoUrl, ExtractorLinkType.M3U8) {
-                        this.quality = Qualities.P1080.value
-                        this.referer = url
-                    }
+                    newExtractorLink("GuardaPlay", "Server HD", match.groupValues[2], cleanUrl, Qualities.P1080.value, true)
                 )
+            } else {
+                // Se non troviamo nulla, proviamo a estrarre tramite l'ID nell'URL
+                val id = cleanUrl.split("#").lastOrNull()
+                if (id != null && id.length > 3) {
+                    // Molti di questi server usano un'API interna tipo /api/source/ID
+                    Log.d("GuardaPlay", "Tentativo estrazione ID: $id")
+                }
             }
         } else {
-            // Altrimenti prova con gli estrattori standard (Voe, Vidhide, ecc.)
-            loadExtractor(url, referer, { }, callback)
+            loadExtractor(cleanUrl, referer, { }, callback)
         }
     }
 }
