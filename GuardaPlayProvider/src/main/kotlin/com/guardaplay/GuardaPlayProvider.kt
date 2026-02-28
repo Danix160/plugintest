@@ -12,8 +12,6 @@ class GuardaPlayProvider : MainAPI() {
     override var lang = "it"
     override val hasMainPage = true
 
-    private val clientUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-
     override val mainPage = mainPageOf(
         "$mainUrl/" to "Ultimi Film",
         "$mainUrl/category/animazione/" to "Animazione",
@@ -66,7 +64,7 @@ class GuardaPlayProvider : MainAPI() {
     ): Boolean {
         val document = app.get(data).document
 
-        // Estrazione Opzioni Player (DooPlay style)
+        // 1. Gestione Server tramite DooPlay Ajax (molto comune su questo sito)
         document.select(".dooplay_player_option").forEach { option ->
             val post = option.attr("data-post")
             val nume = option.attr("data-nume")
@@ -81,7 +79,6 @@ class GuardaPlayProvider : MainAPI() {
                 ).document
                 
                 val src = res.selectFirst("iframe")?.attr("src") ?: res.text().let {
-                    // Cerca URL nel testo se non c'è iframe (a volte è codificato in JSON)
                     Regex("""https?://[^\s"']+""").find(it)?.value
                 }
 
@@ -89,10 +86,10 @@ class GuardaPlayProvider : MainAPI() {
             }
         }
 
-        // Fallback: cerca iframe standard
+        // 2. Fallback per iframe già presenti nella pagina
         document.select("iframe").forEach { 
             val src = it.attr("src")
-            if (src.isNotBlank() && !src.contains("google")) {
+            if (src.isNotBlank() && !src.contains("google") && !src.contains("facebook")) {
                 processFinalUrl(src, data, callback)
             }
         }
@@ -101,30 +98,28 @@ class GuardaPlayProvider : MainAPI() {
     }
 
     private suspend fun processFinalUrl(url: String, referer: String, callback: (ExtractorLink) -> Unit) {
-        var cleanUrl = if (url.startsWith("//")) "https:$url" else url
-        Log.d("GuardaPlay", "Analisi URL: $cleanUrl")
-
-        if (cleanUrl.contains("loadm.cam") || cleanUrl.contains("pancast.net")) {
-            // LoadM richiede spesso un trucco: il file video è caricato via AJAX o ha lo stesso ID dell'hash
+        val cleanUrl = if (url.startsWith("//")) "https:$url" else url
+        
+        // Se è LoadM o simili, proviamo a estrarre il link m3u8 dal codice sorgente
+        if (cleanUrl.contains("loadm.cam") || cleanUrl.contains("pancast") || cleanUrl.contains("mdf-9")) {
             val pageText = app.get(cleanUrl, referer = referer).text
+            val m3u8Regex = Regex("""["'](https?://[^"']+\.m3u8[^"']*)["']""")
+            val match = m3u8Regex.find(pageText)
             
-            // Proviamo a cercare pattern m3u8 o variabili file/sources
-            val videoRegex = Regex("""(file|source|src)\s*[:=]\s*["'](https?://[^"']+\.m3u8[^"']*)["']""")
-            val match = videoRegex.find(pageText)
-            
-            if (match != null) {
+            match?.let {
                 callback.invoke(
-                    newExtractorLink("GuardaPlay", "Server HD", match.groupValues[2], cleanUrl, Qualities.P1080.value, true)
+                    ExtractorLink(
+                        source = "GuardaPlay",
+                        name = "Server HD",
+                        url = it.groupValues[1],
+                        referer = cleanUrl,
+                        quality = Qualities.P1080.value,
+                        isM3u8 = true
+                    )
                 )
-            } else {
-                // Se non troviamo nulla, proviamo a estrarre tramite l'ID nell'URL
-                val id = cleanUrl.split("#").lastOrNull()
-                if (id != null && id.length > 3) {
-                    // Molti di questi server usano un'API interna tipo /api/source/ID
-                    Log.d("GuardaPlay", "Tentativo estrazione ID: $id")
-                }
             }
         } else {
+            // Altrimenti usa gli estrattori automatici di Cloudstream (Voe, Vidhide, ecc.)
             loadExtractor(cleanUrl, referer, { }, callback)
         }
     }
