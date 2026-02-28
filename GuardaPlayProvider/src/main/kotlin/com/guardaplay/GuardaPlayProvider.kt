@@ -14,8 +14,7 @@ class GuardaPlayProvider : MainAPI() {
     private val commonHeaders = mapOf(
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         "Referer" to "$mainUrl/",
-        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language" to "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7"
+        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
     )
 
     override val mainPage = mainPageOf(
@@ -39,13 +38,8 @@ class GuardaPlayProvider : MainAPI() {
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        val href = this.selectFirst("a.lnk-blk")?.attr("href") 
-            ?: this.selectFirst("a")?.attr("href") 
-            ?: return null
-
-        val title = this.selectFirst("h2.entry-title")?.text()?.trim()
-            ?: this.selectFirst("img")?.attr("alt")?.replace("Image ", "")
-            ?: return null
+        val href = this.selectFirst("a.lnk-blk")?.attr("href") ?: this.selectFirst("a")?.attr("href") ?: return null
+        val title = this.selectFirst("h2.entry-title")?.text()?.trim() ?: return null
         
         val img = this.selectFirst("img")
         val posterUrl = img?.let { 
@@ -61,27 +55,18 @@ class GuardaPlayProvider : MainAPI() {
     override suspend fun search(query: String): List<SearchResponse> {
         val searchUrl = "$mainUrl/?s=$query"
         val document = app.get(searchUrl, headers = commonHeaders).document
-        
-        return document.select("li[id^=post-], article.post").mapNotNull { 
-            it.toSearchResult() 
-        }
+        return document.select("li[id^=post-], article.post").mapNotNull { it.toSearchResult() }
     }
 
     override suspend fun load(url: String): LoadResponse {
         val document = app.get(url, headers = commonHeaders).document
-        
         val title = document.selectFirst("h1.entry-title")?.text()?.trim() ?: ""
-        val poster = document.selectFirst(".post-thumbnail img, .poster img")?.let { img ->
-            val src = img.attr("src").ifEmpty { img.attr("data-src") }
-            if (src.startsWith("//")) "https:$src" else src
-        }
+        val poster = document.selectFirst(".post-thumbnail img, .poster img")?.attr("src")
         val plot = document.selectFirst(".description p, .entry-content p")?.text()
-        val year = document.selectFirst("span.year")?.text()?.trim()?.toIntOrNull()
 
         return newMovieLoadResponse(title, url, TvType.Movie, url) {
             this.posterUrl = poster
             this.plot = plot
-            this.year = year
         }
     }
 
@@ -94,8 +79,9 @@ class GuardaPlayProvider : MainAPI() {
         val response = app.get(data, headers = commonHeaders)
         val html = response.text
 
+        // Estrazione ID Video per LoadM
         val videoId = Regex("""/e/([a-zA-Z0-9]+)""").find(html)?.groupValues?.get(1)
-            ?: Regex("""id["']?\s*[:=]\s*["']([^"']+)""").find(html)?.groupValues?.get(1)
+            ?: Regex("""id=([a-zA-Z0-9]+)""").find(html)?.groupValues?.get(1)
 
         if (videoId != null) {
             val apiUrl = "https://loadm.cam/api/v1/video?id=$videoId&r=guardaplay.space"
@@ -112,16 +98,12 @@ class GuardaPlayProvider : MainAPI() {
                     ?: Regex("""https?://[^\s"'<>]+master\.m3u8[^\s"'<>]*""").find(body)?.value
 
                 if (masterLink != null) {
-                    val cleanUrl = masterLink.replace("\\/", "/")
-                    
-                    // SOLUZIONE COMPATIBILE STABLE:
-                    // Usiamo il costruttore classico di ExtractorLink senza il blocco 'headers' interno
-                    // che causa il crash su Stable. Passiamo il referer tramite la stringa.
+                    // UTILIZZO DI EXTRACTORLINK COMPATIBILE CON VERSIONE STABLE
                     callback.invoke(
                         ExtractorLink(
                             source = "LoadM",
                             name = "LoadM",
-                            url = cleanUrl,
+                            url = masterLink.replace("\\/", "/"),
                             referer = "https://loadm.cam/",
                             quality = Qualities.Unknown.value,
                             type = ExtractorLinkType.M3U8
@@ -131,7 +113,7 @@ class GuardaPlayProvider : MainAPI() {
             } catch (e: Exception) { }
         }
 
-        // Caricamento altri estrattori (standard)
+        // Altri estrattori
         val doc = response.document
         doc.select("iframe").forEach { iframe ->
             val src = iframe.attr("src")
