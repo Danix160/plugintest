@@ -16,15 +16,24 @@ class CineblogProvider : MainAPI() {
         val homePageList = mutableListOf<HomePageList>()
         val mainDoc = app.get(mainUrl).document
 
-        val featured = mainDoc.select(".promo-item, .m-item").mapNotNull { it.toSearchResult() }.distinctBy { it.url }
+        // 1. Sezione "In Evidenza"
+        val featured = mainDoc.select(".promo-item, .m-item").mapNotNull {
+            it.toSearchResult()
+        }.distinctBy { it.url }
         if (featured.isNotEmpty()) homePageList.add(HomePageList("In Evidenza", featured))
 
-        val latest = mainDoc.select(".block-th").mapNotNull { it.toSearchResult() }.distinctBy { it.url }
+        // 2. Sezione "Ultimi Aggiunti"
+        val latest = mainDoc.select(".block-th").mapNotNull {
+            it.toSearchResult()
+        }.distinctBy { it.url }
         if (latest.isNotEmpty()) homePageList.add(HomePageList("Ultimi Aggiunti", latest))
 
+        // 3. Sezione "Animazione"
         try {
             val animationDoc = app.get("$mainUrl/film/?genere=2").document
-            val animationItems = animationDoc.select(".block-th, .movie-item").mapNotNull { it.toSearchResult() }.distinctBy { it.url }
+            val animationItems = animationDoc.select(".block-th, .movie-item").mapNotNull {
+                it.toSearchResult()
+            }.distinctBy { it.url }
             if (animationItems.isNotEmpty()) homePageList.add(HomePageList("Animazione", animationItems))
         } catch (e: Exception) { }
 
@@ -33,7 +42,6 @@ class CineblogProvider : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse> {
         val allResults = mutableListOf<SearchResponse>()
-        // Ripristinato il loop per caricare fino a 5 pagine di risultati
         for (page in 1..5) {
             try {
                 val doc = app.post(
@@ -70,7 +78,7 @@ class CineblogProvider : MainAPI() {
                      .replace(Regex("""[\-\s,._/]+$"""), "").trim()
 
         val img = this.selectFirst("img")
-        val posterUrl = fixUrlNull(img?.attr("data-src") ?: img?.attr("src"))
+        val posterUrl = fixUrlNull(img?.attr("data-src")?.ifEmpty { img.attr("src") } ?: img?.attr("src"))
         val isTv = href.contains("/serie-tv/") || title.contains("serie tv", true)
 
         return if (isTv) {
@@ -83,20 +91,20 @@ class CineblogProvider : MainAPI() {
     override suspend fun load(url: String): LoadResponse? {
         val doc = app.get(url).document
         
-        val title = doc.selectFirst("h1")?.text()?.replace(Regex("""(?i)(\s+\d+x\d+.*|Stagion[ei]\s+\d+.*|streaming)"""), "")?.trim() ?: return null
+        val rawTitle = doc.selectFirst("h1")?.text() ?: return null
+        val title = rawTitle.replace(Regex("""(?i)(\[.*?\]|\d+x\d+|Stagion[ei]\s+\d+|streaming|\(\d{4}\))"""), "")
+                            .replace(Regex("""[\-\s,._/]+$"""), "").trim()
         
-        // Selettori poster più robusti per l'anteprima
-        val poster = fixUrlNull(
-            doc.selectFirst("img._player-cover")?.attr("src") ?:
-            doc.selectFirst(".story-poster img, .m-img img, .poster img")?.attr("src") ?:
-            doc.selectFirst("meta[property='og:image']")?.attr("content")
-        )
+        // Fix Poster con selettore .story-cover come richiesto
+        val posterElement = doc.selectFirst(".story-cover img, img[itemprop='image'], .story-poster img, .m-img img")
+        val poster = fixUrlNull(posterElement?.attr("data-src")?.ifEmpty { posterElement.attr("src") } ?: posterElement?.attr("src"))
 
-        // Estrazione trama migliorata
+        // Estrazione trama dai meta tag (più affidabile per le anteprime)
         val plot = doc.selectFirst("meta[name='description']")?.attr("content") ?:
+                   doc.selectFirst("meta[property='og:description']")?.attr("content") ?:
                    doc.selectFirst(".story-text, .m-desc")?.text()
 
-        val seasonContainer = doc.selectFirst(".tt_season")
+        val seasonContainer = doc.selectFirst(".tt_season, .tt_series")
         
         return if (seasonContainer != null) {
             val episodesList = mutableListOf<Episode>()
@@ -139,8 +147,8 @@ class CineblogProvider : MainAPI() {
                 loadExtractor(cleanLink, mainUrl, subtitleCallback, callback)
             } else if (cleanLink.isNotBlank()) {
                 val doc = app.get(cleanLink).document
-                doc.select("iframe[src], a[data-link]").forEach { el ->
-                    val extracted = el.attr("src").ifEmpty { el.attr("data-link") }
+                doc.select("iframe[src], a[data-link], li[data-link]").forEach { el ->
+                    val extracted = el.attr("data-link").ifEmpty { el.attr("src") }
                     if (extracted.startsWith("http") && !extracted.contains("mostraguarda")) {
                         loadExtractor(fixUrl(extracted), mainUrl, subtitleCallback, callback)
                     }
