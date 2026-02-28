@@ -9,6 +9,10 @@ import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
+// =============================================================================
+// PROVIDER PRINCIPALE: GuardaPlay
+// =============================================================================
+
 class GuardaPlayProvider : MainAPI() {
     override var mainUrl = "https://guardaplay.space"
     override var name = "GuardaPlay"
@@ -118,7 +122,7 @@ class GuardaPlayProvider : MainAPI() {
 }
 
 // =============================================================================
-// EXTRACTOR FIXATO
+// ESTRATTORE: VidStack con fix per newExtractorLink
 // =============================================================================
 
 open class VidStack : ExtractorApi() {
@@ -146,16 +150,17 @@ open class VidStack : ExtractorApi() {
         } ?: return
 
         Regex("\"source\":\"(.*?)\"").find(decryptedText)?.groupValues?.get(1)?.replace("\\/", "/")?.let { m3u8 ->
-            // FIX: Utilizzo corretto della firma di newExtractorLink
+            // FIX DEFINITIVO: Parametri corretti per l'SDK Cloudstream
             callback.invoke(
                 newExtractorLink(
                     source = this.name,
                     name = this.name,
                     url = m3u8,
-                    referer = url,
-                    quality = Qualities.P1080.value,
                     type = ExtractorLinkType.M3U8
-                )
+                ) {
+                    this.referer = url
+                    this.quality = Qualities.P1080.value
+                }
             )
         }
 
@@ -177,13 +182,20 @@ class Server1uns : VidStack() {
     override var mainUrl = "https://server1.uns.bio"
 }
 
+// =============================================================================
+// HELPER PER DECRIPTAZIONE AES
+// =============================================================================
+
 object AesHelper {
     fun decryptAES(inputHex: String, key: String, iv: String): String {
         val cipher = Cipher.getInstance("AES/CBC/PKCS5PADDING")
         val secretKey = SecretKeySpec(key.toByteArray(), "AES")
         val ivSpec = IvParameterSpec(iv.toByteArray())
         cipher.init(Cipher.DECRYPT_MODE, secretKey, ivSpec)
-        val decryptedBytes = cipher.doFinal(inputHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray())
+        
+        // Converte Hex in ByteArray
+        val decodedHex = inputHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        val decryptedBytes = cipher.doFinal(decodedHex)
         return String(decryptedBytes)
     }
 }
