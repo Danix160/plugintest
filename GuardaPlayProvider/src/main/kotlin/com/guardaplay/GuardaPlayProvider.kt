@@ -19,7 +19,7 @@ class GuardaPlayProvider : MainAPI() {
     override val hasQuickSearch = true
     override val supportedTypes = setOf(TvType.Movie)
 
-    // Configurazione della Home Page con le categorie richieste
+    // Configurazione della Home Page
     override val mainPage = mainPageOf(
         "$mainUrl/film/" to "Ultimi Film",
         "$mainUrl/category/animazione/" to "Animazione",
@@ -32,12 +32,12 @@ class GuardaPlayProvider : MainAPI() {
         val url = if (page > 1) "${request.data}page/$page/" else request.data
         val document = app.get(url).document
         
-        // Filtro anti-doppioni basato sull'URL univoco del film
         val home = document.select("li.post").mapNotNull {
             it.toSearchResult()
         }.distinctBy { it.url }
 
-        return newHomePageResponse(request.name, home)
+        // CORREZIONE RIGA 52: Usiamo l'operatore Elvis ?: "" per garantire String non nulla
+        return newHomePageResponse(request.name ?: "Home", home)
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
@@ -46,7 +46,6 @@ class GuardaPlayProvider : MainAPI() {
         val posterUrl = fixUrl(this.selectFirst("img")?.attr("src") ?: "")
         val quality = this.selectFirst(".post-ql")?.text()
         
-        // Restituiamo solo Movie dato che non ci sono serie TV
         return newMovieSearchResponse(title, href, TvType.Movie) {
             this.posterUrl = posterUrl
             addQuality(quality)
@@ -65,6 +64,8 @@ class GuardaPlayProvider : MainAPI() {
         val title = document.selectFirst("h1.entry-title")?.text() ?: ""
         val poster = fixUrl(document.selectFirst(".post-thumbnail img")?.attr("src") ?: "")
         val plot = document.selectFirst(".description p")?.text()
+        
+        // Pulizia anno: rimuove tutto ciò che non è un numero
         val year = document.selectFirst(".year")?.text()?.filter { it.isDigit() }?.toIntOrNull()
         
         return newMovieLoadResponse(title, url, TvType.Movie, url) {
@@ -83,7 +84,7 @@ class GuardaPlayProvider : MainAPI() {
         val response = app.get(data)
         val document = response.document
 
-        // 1. Priorità a LoadM (Vidstack) - Gestione ID con cancelletto #
+        // 1. Gestione LoadM (Vidstack)
         document.select("iframe[src*=loadm.cam]").forEach { iframe ->
             val src = iframe.attr("src")
             if (src.isNotEmpty()) {
@@ -96,7 +97,7 @@ class GuardaPlayProvider : MainAPI() {
             }
         }
 
-        // 2. Altri iframe (es. backup o altri server caricati dinamicamente)
+        // 2. Gestione altri iframe generici
         document.select("iframe").forEach { iframe ->
             val src = fixUrl(iframe.attr("src").ifEmpty { iframe.attr("data-src") })
             if (src.isNotEmpty() && !src.contains("loadm.cam") && !src.contains("google")) {
