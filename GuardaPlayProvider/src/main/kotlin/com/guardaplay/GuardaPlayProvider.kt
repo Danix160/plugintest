@@ -6,7 +6,7 @@ import com.lagradost.cloudstream3.extractors.VidStack
 import org.jsoup.nodes.Element
 
 // Estrattore dedicato per LoadM che eredita la logica AES da VidStack
-class LoadM : VidStack() {
+open class LoadM : VidStack() {
     override var name = "LoadM"
     override var mainUrl = "https://loadm.cam"
 }
@@ -19,7 +19,7 @@ class GuardaPlayProvider : MainAPI() {
     override val hasQuickSearch = true
     override val supportedTypes = setOf(TvType.Movie)
 
-    // Configurazione della Home Page
+    // Configurazione della Home Page con le categorie corrette
     override val mainPage = mainPageOf(
         "$mainUrl/film/" to "Ultimi Film",
         "$mainUrl/category/animazione/" to "Animazione",
@@ -32,21 +32,25 @@ class GuardaPlayProvider : MainAPI() {
         val url = if (page > 1) "${request.data}page/$page/" else request.data
         val document = app.get(url).document
         
+        // Estraiamo i post ed eliminiamo i doppioni tramite l'URL
         val home = document.select("li.post").mapNotNull {
             it.toSearchResult()
         }.distinctBy { it.url }
 
-        // CORREZIONE RIGA 52: Usiamo l'operatore Elvis ?: "" per garantire String non nulla
+        // FIX RIGA 51: Usiamo l'operatore Elvis ?: per garantire che il nome non sia mai null
         return newHomePageResponse(request.name ?: "Home", home)
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
+        // Estraiamo il titolo, se manca saltiamo l'elemento
         val title = this.selectFirst(".entry-title")?.text() ?: return null
-        val href = fixUrl(this.selectFirst("a.lnk-blk")?.attr("href") ?: return null)
+        // Estraiamo l'URL dal link .lnk-blk
+        val href = this.selectFirst("a.lnk-blk")?.attr("href") ?: return null
+        // Poster con gestione fallback per URL che iniziano con //
         val posterUrl = fixUrl(this.selectFirst("img")?.attr("src") ?: "")
         val quality = this.selectFirst(".post-ql")?.text()
         
-        return newMovieSearchResponse(title, href, TvType.Movie) {
+        return newMovieSearchResponse(title, fixUrl(href), TvType.Movie) {
             this.posterUrl = posterUrl
             addQuality(quality)
         }
@@ -65,7 +69,7 @@ class GuardaPlayProvider : MainAPI() {
         val poster = fixUrl(document.selectFirst(".post-thumbnail img")?.attr("src") ?: "")
         val plot = document.selectFirst(".description p")?.text()
         
-        // Pulizia anno: rimuove tutto ciò che non è un numero
+        // Pulizia anno: estraiamo solo i numeri per evitare errori di conversione
         val year = document.selectFirst(".year")?.text()?.filter { it.isDigit() }?.toIntOrNull()
         
         return newMovieLoadResponse(title, url, TvType.Movie, url) {
@@ -84,7 +88,7 @@ class GuardaPlayProvider : MainAPI() {
         val response = app.get(data)
         val document = response.document
 
-        // 1. Gestione LoadM (Vidstack)
+        // 1. Priorità all'estrattore LoadM (Vidstack)
         document.select("iframe[src*=loadm.cam]").forEach { iframe ->
             val src = iframe.attr("src")
             if (src.isNotEmpty()) {
@@ -97,7 +101,7 @@ class GuardaPlayProvider : MainAPI() {
             }
         }
 
-        // 2. Gestione altri iframe generici
+        // 2. Controllo altri iframe generici
         document.select("iframe").forEach { iframe ->
             val src = fixUrl(iframe.attr("src").ifEmpty { iframe.attr("data-src") })
             if (src.isNotEmpty() && !src.contains("loadm.cam") && !src.contains("google")) {
