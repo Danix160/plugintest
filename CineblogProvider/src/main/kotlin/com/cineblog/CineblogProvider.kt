@@ -16,24 +16,15 @@ class CineblogProvider : MainAPI() {
         val homePageList = mutableListOf<HomePageList>()
         val mainDoc = app.get(mainUrl).document
 
-        // 1. Sezione "In Evidenza"
-        val featured = mainDoc.select(".promo-item, .m-item").mapNotNull {
-            it.toSearchResult()
-        }.distinctBy { it.url }
+        val featured = mainDoc.select(".promo-item, .m-item").mapNotNull { it.toSearchResult() }.distinctBy { it.url }
         if (featured.isNotEmpty()) homePageList.add(HomePageList("In Evidenza", featured))
 
-        // 2. Sezione "Ultimi Aggiunti"
-        val latest = mainDoc.select(".block-th").mapNotNull {
-            it.toSearchResult()
-        }.distinctBy { it.url }
+        val latest = mainDoc.select(".block-th").mapNotNull { it.toSearchResult() }.distinctBy { it.url }
         if (latest.isNotEmpty()) homePageList.add(HomePageList("Ultimi Aggiunti", latest))
 
-        // 3. Sezione "Animazione"
         try {
             val animationDoc = app.get("$mainUrl/film/?genere=2").document
-            val animationItems = animationDoc.select(".block-th, .movie-item").mapNotNull {
-                it.toSearchResult()
-            }.distinctBy { it.url }
+            val animationItems = animationDoc.select(".block-th, .movie-item").mapNotNull { it.toSearchResult() }.distinctBy { it.url }
             if (animationItems.isNotEmpty()) homePageList.add(HomePageList("Animazione", animationItems))
         } catch (e: Exception) { }
 
@@ -95,11 +86,9 @@ class CineblogProvider : MainAPI() {
         val title = rawTitle.replace(Regex("""(?i)(\[.*?\]|\d+x\d+|Stagion[ei]\s+\d+|streaming|\(\d{4}\))"""), "")
                             .replace(Regex("""[\-\s,._/]+$"""), "").trim()
         
-        // Fix Poster con selettore .story-cover come richiesto
         val posterElement = doc.selectFirst(".story-cover img, img[itemprop='image'], .story-poster img, .m-img img")
         val poster = fixUrlNull(posterElement?.attr("data-src")?.ifEmpty { posterElement.attr("src") } ?: posterElement?.attr("src"))
 
-        // Estrazione trama dai meta tag (più affidabile per le anteprime)
         val plot = doc.selectFirst("meta[name='description']")?.attr("content") ?:
                    doc.selectFirst("meta[property='og:description']")?.attr("content") ?:
                    doc.selectFirst(".story-text, .m-desc")?.text()
@@ -116,10 +105,12 @@ class CineblogProvider : MainAPI() {
                     val mirrors = li.select(".mirrors a.mr").map { it.attr("data-link") }
                     val allLinks = (listOf(mainLink) + mirrors).filter { it.isNotBlank() }.joinToString("|")
 
+                    // AGGIUNTO: questo assegna il poster della serie ad ogni episodio
                     episodesList.add(newEpisode(allLinks) {
                         this.name = a.text().trim()
                         this.season = seasonNum
                         this.episode = a.attr("data-num").filter { it.isDigit() }.toIntOrNull()
+                        this.posterUrl = poster 
                     })
                 }
             }
