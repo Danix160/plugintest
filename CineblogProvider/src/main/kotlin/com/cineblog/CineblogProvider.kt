@@ -38,7 +38,7 @@ class CineblogProvider : MainAPI() {
             if (animItems.isNotEmpty()) homePageList.add(HomePageList("Animazione", animItems))
         } catch (e: Exception) { }
 
-        // 5. Azione (Nuova Sezione)
+        // 5. Azione
         try {
             val actionDoc = app.get("$mainUrl/film/?genere=1").document
             val actionItems = actionDoc.select(".block-th, .movie-item").mapNotNull { it.toSearchResult() }.distinctBy { it.url }
@@ -102,7 +102,17 @@ class CineblogProvider : MainAPI() {
         
         val posterElement = doc.selectFirst(".story-cover img, img[itemprop='image'], .story-poster img, .m-img img")
         val poster = fixUrlNull(posterElement?.attr("data-src")?.ifEmpty { posterElement.attr("src") } ?: posterElement?.attr("src"))
-        val plot = doc.selectFirst("meta[name='description']")?.attr("content") ?: doc.selectFirst(".story-text, .m-desc")?.text()
+
+        // --- SISTEMAZIONE TRAMA ---
+        val storyEl = doc.selectFirst(".story.space-sm")
+        val plot = if (storyEl != null) {
+            // Rimuoviamo il tag <strong> (titolo streaming inutile) e il link +Info
+            storyEl.select("strong, a").remove()
+            storyEl.text().trim()
+        } else {
+            doc.selectFirst("meta[name='description']")?.attr("content") ?:
+            doc.selectFirst(".story-text, .m-desc")?.text()
+        }
 
         val seasonContainer = doc.selectFirst(".tt_season, .tt_series")
         
