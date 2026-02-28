@@ -82,21 +82,16 @@ class GuardaPlayProvider : MainAPI() {
                 }
 
                 src?.let { url ->
-                    // Lanciamo in un contesto suspend per gestire processFinalUrl
-                    argamum.coroutines.runBlocking {
-                        processFinalUrl(url, data, callback)
-                    }
+                    processFinalUrl(url, data, callback)
                 }
             }
         }
 
-        // 2. Fallback per iframe diretti
+        // 2. Fallback per iframe diretti nel corpo della pagina
         document.select("iframe").forEach { 
             val src = it.attr("src")
             if (src.isNotBlank() && !src.contains("google") && !src.contains("facebook")) {
-                argamum.coroutines.runBlocking {
-                    processFinalUrl(src, data, callback)
-                }
+                processFinalUrl(src, data, callback)
             }
         }
 
@@ -106,40 +101,31 @@ class GuardaPlayProvider : MainAPI() {
     private suspend fun processFinalUrl(url: String, referer: String, callback: (ExtractorLink) -> Unit) {
         val cleanUrl = if (url.startsWith("//")) "https:$url" else url
         
-        // Se l'URL è già un link m3u8 (HLS)
-        if (cleanUrl.contains(".m3u8")) {
-            callback.invoke(
-                newExtractorLink(
-                    source = "GuardaPlay",
-                    name = "Server HD (Direct)",
-                    url = cleanUrl,
-                    referer = referer,
-                    quality = Qualities.P1080.value,
-                    isM3u8 = true
-                )
-            )
-            return
-        }
+        if (cleanUrl.contains(".m3u8") || cleanUrl.contains("loadm.cam") || cleanUrl.contains("pancast")) {
+            val finalUrl = if (cleanUrl.contains(".m3u8")) {
+                cleanUrl
+            } else {
+                val response = app.get(cleanUrl, referer = referer).text
+                Regex("""["'](https?://[^"']+\.m3u8[^"']*)["']""").find(response)?.groupValues?.get(1)
+            }
 
-        // Se è una pagina di LoadM o server simili
-        if (cleanUrl.contains("loadm.cam") || cleanUrl.contains("pancast") || cleanUrl.contains("mdf-9")) {
-            val response = app.get(cleanUrl, referer = referer).text
-            val m3u8Regex = Regex("""["'](https?://[^"']+\.m3u8[^"']*)["']""")
-            val match = m3u8Regex.find(response)
-            
-            match?.let {
+            finalUrl?.let { link ->
+                val type = if (link.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                
                 callback.invoke(
                     newExtractorLink(
-                        source = "GuardaPlay",
-                        name = "Server HD",
-                        url = it.groupValues[1],
-                        referer = cleanUrl,
-                        quality = Qualities.P1080.value,
-                        isM3u8 = true
-                    )
+                        "GuardaPlay",
+                        "Server HD",
+                        link.replace("\\/", "/"),
+                        type
+                    ) {
+                        this.quality = Qualities.P1080.value
+                        this.referer = cleanUrl
+                    }
                 )
             }
         } else {
+            // Usa gli estrattori di sistema per Voe, Vidhide, ecc.
             loadExtractor(cleanUrl, referer, { }, callback)
         }
     }
