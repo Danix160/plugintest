@@ -2,9 +2,6 @@ package com.guardaplay
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import com.lagradost.cloudstream3.utils.ExtractorLink
-import com.lagradost.cloudstream3.utils.ExtractorLinkType
-import com.lagradost.cloudstream3.utils.Qualities
 import org.jsoup.nodes.Element
 
 class GuardaPlayProvider : MainAPI() {
@@ -28,7 +25,6 @@ class GuardaPlayProvider : MainAPI() {
         val url = if (page <= 1) request.data else "${request.data}page/$page/"
         val document = app.get(url).document
         
-        // Analisi basata su posterhome.txt: ogni film è in un li.movies
         val home = document.select("li.movies").mapNotNull {
             it.toSearchResult()
         }
@@ -39,7 +35,6 @@ class GuardaPlayProvider : MainAPI() {
         val title = selectFirst(".entry-title")?.text() ?: return null
         val href = selectFirst("a.lnk-blk")?.attr("href") ?: return null
         
-        // Gestione poster: spesso i link iniziano con // (TMDB)
         var posterUrl = selectFirst("img")?.attr("src")
         if (posterUrl?.startsWith("//") == true) {
             posterUrl = "https:$posterUrl"
@@ -87,38 +82,36 @@ class GuardaPlayProvider : MainAPI() {
         val document = response.document
         val html = response.text
 
-        // 1. GESTIONE LOADM (dal file filmdopoframe.txt)
+        // 1. GESTIONE LOADM
         document.select("iframe").forEach { iframe ->
             val src = iframe.attr("src")
             if (src.contains("loadm.cam")) {
                 try {
                     val frameRes = app.get(src, referer = data).text
-                    // Cerchiamo il link master.m3u8 nel sorgente del player
                     val m3u8Regex = Regex("""src\s*:\s*["'](https?://[^"']+\.m3u8[^"']*)""").find(frameRes)
                     val finalUrl = m3u8Regex?.groupValues?.get(1)
 
                     if (finalUrl != null) {
+                        // FIX: Spostati referer e quality nel blocco lambda {}
                         callback.invoke(
                             newExtractorLink(
                                 source = "LoadM",
                                 name = "LoadM",
                                 url = finalUrl.replace("\\/", "/"),
-                                referer = "https://loadm.cam/",
-                                quality = Qualities.P1080.value,
                                 type = ExtractorLinkType.M3U8
-                            )
+                            ) {
+                                this.referer = "https://loadm.cam/"
+                                this.quality = Qualities.P1080.value
+                            }
                         )
                     }
-                } catch (e: Exception) {
-                    // Errore nel caricamento del frame, proseguiamo
-                }
+                } catch (e: Exception) { }
             } else if (src.isNotEmpty() && !src.contains("google") && !src.contains("youtube")) {
-                // Altri iframe (Mixdrop, Streamtape, ecc.)
                 loadExtractor(src, data, subtitleCallback, callback)
             }
         }
 
-        // 2. RICERCA LINK DIRETTI NEL JS (VOE, VIDHIDE, ETC)
+        // 2. RICERCA LINK DIRETTI
         val regex = Regex("""https?://(?:vidhide|voe|streamwish|mixdrop|filemoon|ryderjet|vood|embedwish)[^\s"'<>\\\/]+""")
         regex.findAll(html).forEach { match ->
             val cleanUrl = match.value.replace("\\/", "/")
