@@ -28,17 +28,16 @@ class GuardaPlayProvider : MainAPI() {
         "$mainUrl/category/horror/" to "Horror",
     )
 
-    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val url = if (page > 1) "${request.data}page/$page/" else request.data
-        val document = app.get(url).document
+   override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
+        val url = if (page <= 1) request.data else "${request.data}page/$page/"
+        val response = app.get(url, headers = commonHeaders)
+        val document = response.document
         
-        // Estraiamo i post ed eliminiamo i doppioni tramite l'URL
-        val home = document.select("li.post").mapNotNull {
-            it.toSearchResult()
-        }.distinctBy { it.url }
-
-        // FIX RIGA 51: Usiamo l'operatore Elvis ?: per garantire che il nome non sia mai null
-        return newHomePageResponse(request.name ?: "Home", home)
+        val items = document.select("li[id^=post-], article.post").mapNotNull { 
+            it.toSearchResult() 
+        }
+        
+        return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
