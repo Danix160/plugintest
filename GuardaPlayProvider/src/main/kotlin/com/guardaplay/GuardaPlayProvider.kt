@@ -23,23 +23,29 @@ class GuardaPlayProvider : MainAPI() {
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = if (page <= 1) request.data else "${request.data}page/$page/"
         val document = app.get(url).document
-        val home = document.select("li.movies, article.movies").mapNotNull { it.toSearchResult() }
+        // Usiamo solo "article.movies" per evitare i doppioni causati dal tag "li"
+        val home = document.select("article.movies").mapNotNull { it.toSearchResult() }
         return newHomePageResponse(request.name, home)
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/?s=$query"
         val document = app.get(url).document
-        return document.select("li.movies, article.movies").mapNotNull { it.toSearchResult() }
+        return document.select("article.movies").mapNotNull { it.toSearchResult() }
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
         val title = selectFirst(".entry-title")?.text() ?: return null
         val href = selectFirst("a.lnk-blk")?.attr("href") ?: return null
+        
+        // Estrazione poster con gestione corretta del protocollo //
         val posterUrl = selectFirst("img")?.attr("src")?.let { 
             if (it.startsWith("//")) "https:$it" else it 
         }
-        return newMovieSearchResponse(title, href, TvType.Movie) { this.posterUrl = posterUrl }
+        
+        return newMovieSearchResponse(title, href, TvType.Movie) { 
+            this.posterUrl = posterUrl 
+        }
     }
 
     override suspend fun load(url: String): LoadResponse {
@@ -62,71 +68,82 @@ class GuardaPlayProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val document = app.get(data).document
+        var foundAny = false
 
-        // 1. Gestione Server tramite DooPlay Ajax
-        document.select(".dooplay_player_option").forEach { option ->
+        // 1. DooPlay Player Options (AJAX)
+        document.select(".dooplay_player_option, li[id^=player-option-]").forEach { option ->
             val post = option.attr("data-post")
             val nume = option.attr("data-nume")
             val type = option.attr("data-type")
 
             if (post.isNotBlank()) {
-                val res = app.post(
+                val response = app.post(
                     "$mainUrl/wp-admin/admin-ajax.php",
-                    data = mapOf("action" to "doo_player_ajax", "post" to post, "nume" to nume, "type" to type),
+                    data = mapOf(
+                        "action" to "doo_player_ajax",
+                        "post" to post,
+                        "nume" to nume,
+                        "type" to type
+                    ),
                     referer = data,
                     headers = mapOf("X-Requested-With" to "XMLHttpRequest")
-                ).document
-                
-                val src = res.selectFirst("iframe")?.attr("src") ?: res.text().let {
-                    Regex("""https?://[^\s"']+""").find(it)?.value
-                }
+                ).text
 
-                src?.let { url ->
-                    processFinalUrl(url, data, callback)
+                // Cerchiamo l'URL dell'iframe o il link diretto nel testo della risposta
+                val iframeUrl = Regex("""<iframe.*?src=["'](.*?)["']""").find(response)?.groupValues?.get(1)
+                    ?: Regex("""https?://[^\s"']+""").find(response)?.value
+
+                iframeUrl?.let { 
+                    if (processFinalUrl(it, data, callback)) foundAny = true 
                 }
             }
         }
 
-        // 2. Fallback per iframe diretti nel corpo della pagina
-        document.select("iframe").forEach { 
-            val src = it.attr("src")
-            if (src.isNotBlank() && !src.contains("google") && !src.contains("facebook")) {
-                processFinalUrl(src, data, callback)
+        // 2. Fallback per iframe statici
+        if (!foundAny) {
+            document.select("iframe").forEach { 
+                val src = it.attr("src")
+                if (src.contains("http") && !src.contains("facebook") && !src.contains("google")) {
+                    if (processFinalUrl(src, data, callback)) foundAny = true
+                }
             }
         }
 
-        return true
+        return foundAny
     }
 
-    private suspend fun processFinalUrl(url: String, referer: String, callback: (ExtractorLink) -> Unit) {
-        val cleanUrl = if (url.startsWith("//")) "https:$url" else url
+    private suspend fun processFinalUrl(url: String, referer: String, callback: (ExtractorLink) -> Unit): Boolean {
+        val cleanUrl = url.replace("\\/", "/").let { if (it.startsWith("//")) "https:$it" else it }
         
-        if (cleanUrl.contains(".m3u8") || cleanUrl.contains("loadm.cam") || cleanUrl.contains("pancast")) {
-            val finalUrl = if (cleanUrl.contains(".m3u8")) {
-                cleanUrl
-            } else {
-                val response = app.get(cleanUrl, referer = referer).text
-                Regex("""["'](https?://[^"']+\.m3u8[^"']*)["']""").find(response)?.groupValues?.get(1)
-            }
+        return when {
+            // Gestione server m3u8 personalizzati (LoadM, Pancast, etc.)
+            cleanUrl.contains("loadm.cam") || cleanUrl.contains("pancast") || cleanUrl.contains(".m3u8") -> {
+                val streamUrl = if (cleanUrl.contains(".m3u8")) {
+                    cleanUrl
+                } else {
+                    val pageText = app.get(cleanUrl, referer = referer).text
+                    Regex("""["'](https?://[^"']+\.m3u8[^"']*)["']""").find(pageText)?.groupValues?.get(1)
+                }
 
-            finalUrl?.let { link ->
-                val type = if (link.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
-                
-                callback.invoke(
-                    newExtractorLink(
-                        "GuardaPlay",
-                        "Server HD",
-                        link.replace("\\/", "/"),
-                        type
-                    ) {
-                        this.quality = Qualities.P1080.value
-                        this.referer = cleanUrl
-                    }
-                )
+                streamUrl?.let {
+                    callback.invoke(
+                        newExtractorLink(
+                            "GuardaPlay",
+                            "Server HD",
+                            it,
+                            ExtractorLinkType.M3U8
+                        ) {
+                            this.quality = Qualities.P1080.value
+                            this.referer = cleanUrl
+                        }
+                    )
+                    true
+                } ?: false
             }
-        } else {
-            // Usa gli estrattori di sistema per Voe, Vidhide, ecc.
-            loadExtractor(cleanUrl, referer, { }, callback)
+            else -> {
+                // Carica estrattori automatici (Voe, Vidhide, ecc.)
+                loadExtractor(cleanUrl, referer, { }, callback)
+            }
         }
     }
 }
