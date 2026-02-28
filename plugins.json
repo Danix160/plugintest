@@ -24,7 +24,7 @@
         "iconUrl": "https://cineblog001.club/templates/CB01/img/logo.png",
         "apiVersion": 1,
         "repositoryUrl": "https://github.com/Danix160/Danix-Repository",
-        "fileSize": 14385,
+        "fileSize": 14511,
         "status": 1,
         "language": "it",
         "authors": [
@@ -34,7 +34,7 @@
             "Movie",
             "TvSeries"
         ],
-        "version": 61,
+        "version": 62,
         "internalName": "CineblogProvider",
         "description": "cineblog001.club",
         "url": "https://raw.githubusercontent.com/Danix160/Danix-Repository/builds/CineblogProvider.cs3",
