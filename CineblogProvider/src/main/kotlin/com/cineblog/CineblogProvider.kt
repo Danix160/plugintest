@@ -105,12 +105,19 @@ class CineblogProvider : MainAPI() {
                     val mirrors = li.select(".mirrors a.mr").map { it.attr("data-link") }
                     val allLinks = (listOf(mainLink) + mirrors).filter { it.isNotBlank() }.joinToString("|")
 
-                    // AGGIUNTO: questo assegna il poster della serie ad ogni episodio
+                    val dataNum = a.attr("data-num") // Spesso è "1x05" o simile
+                    val epNum = if (dataNum.contains("x")) {
+                        dataNum.substringAfter("x").filter { it.isDigit() }.toIntOrNull()
+                    } else {
+                        dataNum.filter { it.isDigit() }.toIntOrNull()
+                    } ?: a.text().filter { it.isDigit() }.toIntOrNull()
+
                     episodesList.add(newEpisode(allLinks) {
-                        this.name = a.text().trim()
+                        // SISTEMAZIONE VISUALE: Mostra solo "Episodio X" invece del testo sporco del sito
+                        this.name = "Episodio $epNum"
                         this.season = seasonNum
-                        this.episode = a.attr("data-num").filter { it.isDigit() }.toIntOrNull()
-                        this.posterUrl = poster 
+                        this.episode = epNum
+                        this.posterUrl = poster
                     })
                 }
             }
