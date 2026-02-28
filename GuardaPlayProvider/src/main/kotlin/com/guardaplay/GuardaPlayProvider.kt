@@ -29,8 +29,7 @@ class GuardaPlayProvider : MainAPI() {
         val response = app.get(url, headers = commonHeaders)
         val document = response.document
         
-        // Seleziona gli articoli basandosi sulla struttura post-thumbnail fornita
-        val items = document.select("article, .post, .item").mapNotNull { 
+        val items = document.select("article, .post, .item, .post-thumbnail").mapNotNull { 
             it.toSearchResult()
         }
         
@@ -38,10 +37,15 @@ class GuardaPlayProvider : MainAPI() {
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        val href = this.selectFirst("a")?.attr("href") ?: return null
-        val title = this.selectFirst("img")?.attr("alt")?.replace("Image ", "") 
-            ?: this.selectFirst(".entry-title")?.text() ?: return null
+        // Cerca il link: può essere nel tag 'a' o nell'elemento padre
+        val href = this.selectFirst("a")?.attr("href") 
+            ?: this.parent()?.selectFirst("a")?.attr("href") ?: return null
+            
+        // Estrae il titolo dal tag 'alt' dell'immagine (es: "Image Accused" -> "Accused")
+        val title = this.selectFirst("img")?.attr("alt")?.replace("Image ", "")?.trim()
+            ?: this.selectFirst(".entry-title")?.text() ?: "Senza Titolo"
         
+        // Gestione immagine con protocollo // o path relativi
         val imgElement = this.selectFirst("img")
         val posterUrl = imgElement?.let {
             val src = it.attr("src").ifEmpty { it.attr("data-src") }
@@ -59,7 +63,7 @@ class GuardaPlayProvider : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse> {
         val document = app.get("$mainUrl/?s=$query", headers = commonHeaders).document
-        return document.select("article, .post").mapNotNull { it.toSearchResult() }
+        return document.select("article, .post, .post-thumbnail").mapNotNull { it.toSearchResult() }
     }
 
     override suspend fun load(url: String): LoadResponse {
@@ -85,24 +89,24 @@ class GuardaPlayProvider : MainAPI() {
         val response = app.get(data, headers = commonHeaders)
         val html = response.text
 
-        // 1. ESTRAZIONE DIRETTA VIDSTACK (File .txt mascherato come HLS)
-        // Cerca il link sbi.merchantserviceshub.shop o simili con estensione .txt
-        val vidstackRegex = Regex("""src=["'](https?://[^"']+\.txt)["']""")
+        // 1. ESTRAZIONE VIDSTACK (Il file .txt visto nel player)
+        // Questo regex cattura il link cf-master.xxxx.txt che è un M3U8
+        val vidstackRegex = Regex("""src=["'](https?://[^"']+/v4/xq/[^"']+\.txt)["']""")
         vidstackRegex.findAll(html).forEach { match ->
             val streamUrl = match.groupValues[1]
             callback.invoke(
-                ExtractorLink(
-                    "LoadM Vidstack",
-                    "LoadM HQ",
+                newExtractorLink(
+                    "LoadM (Vidstack)",
+                    "LoadM Server HQ",
                     streamUrl,
                     "https://loadm.cam/",
                     Qualities.P1080.value,
-                    isM3u8 = true
+                    type = ExtractorLinkType.M3U8
                 )
             )
         }
 
-        // 2. METODO API LOADM (Bypass del clic)
+        // 2. METODO API TRADIZIONALE (Se l'ID è presente nel JS o iframe)
         val videoId = Regex("""video_id\s*[:=]\s*["']([^"']+)""").find(html)?.groupValues?.get(1)
             ?: Regex("""/e/([^"'?]+)""").find(html)?.groupValues?.get(1)
 
@@ -117,20 +121,20 @@ class GuardaPlayProvider : MainAPI() {
                 val finalUrl = Regex("""https?://[^\s"'<>]+(?:\.m3u8|\.mp4)[^\s"'<>]*""").find(apiRes)?.value
                 if (finalUrl != null) {
                     callback.invoke(
-                        ExtractorLink(
+                        newExtractorLink(
                             "LoadM API",
                             "LoadM Server",
                             finalUrl.replace("\\/", "/"),
                             "https://loadm.cam/",
                             Qualities.P1080.value,
-                            isM3u8 = finalUrl.contains(".m3u8")
+                            type = if (finalUrl.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
                         )
                     )
                 }
             } catch (e: Exception) { }
         }
 
-        // 3. ESTRATTORI GENERICI (Voe, Streamwish, etc.)
+        // 3. ESTRATTORI STANDARD (Voe, Streamwish, etc.)
         val document = response.document
         document.select("iframe").forEach { iframe ->
             val src = iframe.attr("src").ifEmpty { iframe.attr("data-src") }
