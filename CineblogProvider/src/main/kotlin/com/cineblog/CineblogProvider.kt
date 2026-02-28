@@ -16,16 +16,33 @@ class CineblogProvider : MainAPI() {
         val homePageList = mutableListOf<HomePageList>()
         val mainDoc = app.get(mainUrl).document
 
+        // 1. In Evidenza
         val featured = mainDoc.select(".promo-item, .m-item").mapNotNull { it.toSearchResult() }.distinctBy { it.url }
         if (featured.isNotEmpty()) homePageList.add(HomePageList("In Evidenza", featured))
 
+        // 2. Ultimi Aggiunti
         val latest = mainDoc.select(".block-th").mapNotNull { it.toSearchResult() }.distinctBy { it.url }
         if (latest.isNotEmpty()) homePageList.add(HomePageList("Ultimi Aggiunti", latest))
 
+        // 3. Serie TV
         try {
-            val animationDoc = app.get("$mainUrl/film/?genere=2").document
-            val animationItems = animationDoc.select(".block-th, .movie-item").mapNotNull { it.toSearchResult() }.distinctBy { it.url }
-            if (animationItems.isNotEmpty()) homePageList.add(HomePageList("Animazione", animationItems))
+            val tvDoc = app.get("$mainUrl/serie-tv/").document
+            val tvItems = tvDoc.select(".block-th, .movie-item").mapNotNull { it.toSearchResult() }.distinctBy { it.url }
+            if (tvItems.isNotEmpty()) homePageList.add(HomePageList("Serie TV", tvItems))
+        } catch (e: Exception) { }
+
+        // 4. Animazione
+        try {
+            val animDoc = app.get("$mainUrl/film/?genere=2").document
+            val animItems = animDoc.select(".block-th, .movie-item").mapNotNull { it.toSearchResult() }.distinctBy { it.url }
+            if (animItems.isNotEmpty()) homePageList.add(HomePageList("Animazione", animItems))
+        } catch (e: Exception) { }
+
+        // 5. Azione (Nuova Sezione)
+        try {
+            val actionDoc = app.get("$mainUrl/film/?genere=1").document
+            val actionItems = actionDoc.select(".block-th, .movie-item").mapNotNull { it.toSearchResult() }.distinctBy { it.url }
+            if (actionItems.isNotEmpty()) homePageList.add(HomePageList("Azione", actionItems))
         } catch (e: Exception) { }
 
         return newHomePageResponse(homePageList, false)
@@ -46,10 +63,7 @@ class CineblogProvider : MainAPI() {
                         "story" to query
                     )
                 ).document
-                
-                val pagedResults = doc.select(".m-item, .movie-item, article, .block-th").mapNotNull {
-                    it.toSearchResult()
-                }
+                val pagedResults = doc.select(".m-item, .movie-item, article, .block-th").mapNotNull { it.toSearchResult() }
                 if (pagedResults.isEmpty()) break
                 allResults.addAll(pagedResults)
             } catch (e: Exception) { break }
@@ -65,12 +79,13 @@ class CineblogProvider : MainAPI() {
         var title = this.selectFirst(".block-th-haeding, h2, h3, .m-title")?.text() 
                     ?: a.attr("title").ifEmpty { a.text() }
         
-        title = title.replace(Regex("""(?i)(\[.*?\]|\d+x\d+|Stagion[ei]\s+\d+|streaming|\(\d{4}\))"""), "")
+        title = title.replace(Regex("""(?i)(\[.*?\]|\d+x\d+|Stagion[ei]\s+\d+|streaming|\(\d{4}.*?\))"""), "")
                      .replace(Regex("""[\-\s,._/]+$"""), "").trim()
 
         val img = this.selectFirst("img")
         val posterUrl = fixUrlNull(img?.attr("data-src")?.ifEmpty { img.attr("src") } ?: img?.attr("src"))
-        val isTv = href.contains("/serie-tv/") || title.contains("serie tv", true)
+        
+        val isTv = href.contains("/serie-tv/") || this.selectFirst(".se_num") != null || title.contains("serie tv", true)
 
         return if (isTv) {
             newTvSeriesSearchResponse(title, href, TvType.TvSeries) { this.posterUrl = posterUrl }
@@ -81,17 +96,13 @@ class CineblogProvider : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse? {
         val doc = app.get(url).document
-        
         val rawTitle = doc.selectFirst("h1")?.text() ?: return null
-        val title = rawTitle.replace(Regex("""(?i)(\[.*?\]|\d+x\d+|Stagion[ei]\s+\d+|streaming|\(\d{4}\))"""), "")
+        val title = rawTitle.replace(Regex("""(?i)(\[.*?\]|\d+x\d+|Stagion[ei]\s+\d+|streaming|\(\d{4}.*?\))"""), "")
                             .replace(Regex("""[\-\s,._/]+$"""), "").trim()
         
         val posterElement = doc.selectFirst(".story-cover img, img[itemprop='image'], .story-poster img, .m-img img")
         val poster = fixUrlNull(posterElement?.attr("data-src")?.ifEmpty { posterElement.attr("src") } ?: posterElement?.attr("src"))
-
-        val plot = doc.selectFirst("meta[name='description']")?.attr("content") ?:
-                   doc.selectFirst("meta[property='og:description']")?.attr("content") ?:
-                   doc.selectFirst(".story-text, .m-desc")?.text()
+        val plot = doc.selectFirst("meta[name='description']")?.attr("content") ?: doc.selectFirst(".story-text, .m-desc")?.text()
 
         val seasonContainer = doc.selectFirst(".tt_season, .tt_series")
         
@@ -105,7 +116,7 @@ class CineblogProvider : MainAPI() {
                     val mirrors = li.select(".mirrors a.mr").map { it.attr("data-link") }
                     val allLinks = (listOf(mainLink) + mirrors).filter { it.isNotBlank() }.joinToString("|")
 
-                    val dataNum = a.attr("data-num") // Spesso è "1x05" o simile
+                    val dataNum = a.attr("data-num")
                     val epNum = if (dataNum.contains("x")) {
                         dataNum.substringAfter("x").filter { it.isDigit() }.toIntOrNull()
                     } else {
@@ -113,7 +124,6 @@ class CineblogProvider : MainAPI() {
                     } ?: a.text().filter { it.isDigit() }.toIntOrNull()
 
                     episodesList.add(newEpisode(allLinks) {
-                        // SISTEMAZIONE VISUALE: Mostra solo "Episodio X" invece del testo sporco del sito
                         this.name = "Episodio $epNum"
                         this.season = seasonNum
                         this.episode = epNum
