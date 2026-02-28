@@ -2,7 +2,6 @@ package com.guardaplay
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import org.jsoup.nodes.Element
 
 class GuardaPlayProvider : MainAPI() {
@@ -82,7 +81,12 @@ class GuardaPlayProvider : MainAPI() {
                     Regex("""https?://[^\s"']+""").find(it)?.value
                 }
 
-                src?.let { processFinalUrl(it, data, callback) }
+                src?.let { url ->
+                    // Lanciamo in un contesto suspend per gestire processFinalUrl
+                    argamum.coroutines.runBlocking {
+                        processFinalUrl(url, data, callback)
+                    }
+                }
             }
         }
 
@@ -90,7 +94,9 @@ class GuardaPlayProvider : MainAPI() {
         document.select("iframe").forEach { 
             val src = it.attr("src")
             if (src.isNotBlank() && !src.contains("google") && !src.contains("facebook")) {
-                processFinalUrl(src, data, callback)
+                argamum.coroutines.runBlocking {
+                    processFinalUrl(src, data, callback)
+                }
             }
         }
 
@@ -103,7 +109,7 @@ class GuardaPlayProvider : MainAPI() {
         // Se l'URL è già un link m3u8 (HLS)
         if (cleanUrl.contains(".m3u8")) {
             callback.invoke(
-                ExtractorLink(
+                newExtractorLink(
                     source = "GuardaPlay",
                     name = "Server HD (Direct)",
                     url = cleanUrl,
@@ -115,17 +121,15 @@ class GuardaPlayProvider : MainAPI() {
             return
         }
 
-        // Se è una pagina di LoadM o server simili che caricano in blob/m3u8
+        // Se è una pagina di LoadM o server simili
         if (cleanUrl.contains("loadm.cam") || cleanUrl.contains("pancast") || cleanUrl.contains("mdf-9")) {
             val response = app.get(cleanUrl, referer = referer).text
-            
-            // Regex per estrarre il master.m3u8 o simili dal sorgente
             val m3u8Regex = Regex("""["'](https?://[^"']+\.m3u8[^"']*)["']""")
             val match = m3u8Regex.find(response)
             
             match?.let {
                 callback.invoke(
-                    ExtractorLink(
+                    newExtractorLink(
                         source = "GuardaPlay",
                         name = "Server HD",
                         url = it.groupValues[1],
@@ -136,7 +140,6 @@ class GuardaPlayProvider : MainAPI() {
                 )
             }
         } else {
-            // Usa gli estrattori automatici di Cloudstream per i server noti
             loadExtractor(cleanUrl, referer, { }, callback)
         }
     }
