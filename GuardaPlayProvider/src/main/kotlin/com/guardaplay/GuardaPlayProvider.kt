@@ -1,8 +1,8 @@
 package com.guardaplay
 
-import android.util.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
+import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import org.jsoup.nodes.Element
 
 class GuardaPlayProvider : MainAPI() {
@@ -64,7 +64,7 @@ class GuardaPlayProvider : MainAPI() {
     ): Boolean {
         val document = app.get(data).document
 
-        // 1. Gestione Server tramite DooPlay Ajax (molto comune su questo sito)
+        // 1. Gestione Server tramite DooPlay Ajax
         document.select(".dooplay_player_option").forEach { option ->
             val post = option.attr("data-post")
             val nume = option.attr("data-nume")
@@ -86,7 +86,7 @@ class GuardaPlayProvider : MainAPI() {
             }
         }
 
-        // 2. Fallback per iframe già presenti nella pagina
+        // 2. Fallback per iframe diretti
         document.select("iframe").forEach { 
             val src = it.attr("src")
             if (src.isNotBlank() && !src.contains("google") && !src.contains("facebook")) {
@@ -100,11 +100,28 @@ class GuardaPlayProvider : MainAPI() {
     private suspend fun processFinalUrl(url: String, referer: String, callback: (ExtractorLink) -> Unit) {
         val cleanUrl = if (url.startsWith("//")) "https:$url" else url
         
-        // Se è LoadM o simili, proviamo a estrarre il link m3u8 dal codice sorgente
+        // Se l'URL è già un link m3u8 (HLS)
+        if (cleanUrl.contains(".m3u8")) {
+            callback.invoke(
+                ExtractorLink(
+                    source = "GuardaPlay",
+                    name = "Server HD (Direct)",
+                    url = cleanUrl,
+                    referer = referer,
+                    quality = Qualities.P1080.value,
+                    isM3u8 = true
+                )
+            )
+            return
+        }
+
+        // Se è una pagina di LoadM o server simili che caricano in blob/m3u8
         if (cleanUrl.contains("loadm.cam") || cleanUrl.contains("pancast") || cleanUrl.contains("mdf-9")) {
-            val pageText = app.get(cleanUrl, referer = referer).text
+            val response = app.get(cleanUrl, referer = referer).text
+            
+            // Regex per estrarre il master.m3u8 o simili dal sorgente
             val m3u8Regex = Regex("""["'](https?://[^"']+\.m3u8[^"']*)["']""")
-            val match = m3u8Regex.find(pageText)
+            val match = m3u8Regex.find(response)
             
             match?.let {
                 callback.invoke(
@@ -119,7 +136,7 @@ class GuardaPlayProvider : MainAPI() {
                 )
             }
         } else {
-            // Altrimenti usa gli estrattori automatici di Cloudstream (Voe, Vidhide, ecc.)
+            // Usa gli estrattori automatici di Cloudstream per i server noti
             loadExtractor(cleanUrl, referer, { }, callback)
         }
     }
