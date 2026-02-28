@@ -64,54 +64,58 @@ class GuardaPlayProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // Carichiamo la pagina principale del film
         val response = app.get(data, headers = mapOf("User-Agent" to clientUserAgent))
         val document = response.document
 
-        // Cerchiamo tutti i possibili iframe o bottoni del player
-        // Il tuo log mostra: ?trembed=0&trid=56450&trtype=1
+        // 1. Analisi Iframe e Embed
         document.select("iframe, div[data-src], div[data-litespeed-src], .dooplay_player_option").forEach { element ->
             var src = element.attr("src")
                 .ifEmpty { element.attr("data-src") }
                 .ifEmpty { element.attr("data-litespeed-src") }
-                .ifEmpty { element.attr("data-url") } // Aggiunto per i bottoni dooplay
+                .ifEmpty { element.attr("data-url") }
 
             if (src.isBlank()) return@forEach
             if (src.startsWith("//")) src = "https:$src"
             if (src.startsWith("/")) src = mainUrl + src
 
-            Log.d("GuardaPlay", "Analisi sorgente: $src")
-
-            // Se l'URL contiene "trembed", dobbiamo caricarlo per vedere cosa c'è dentro
+            // Caso Embed Interno (quello che abbiamo visto nel log)
             if (src.contains("trembed")) {
                 try {
                     val innerPage = app.get(src, referer = data).document
                     val innerIframe = innerPage.selectFirst("iframe")?.attr("src")
                     if (innerIframe != null) {
                         val finalUrl = if (innerIframe.startsWith("//")) "https:$innerIframe" else innerIframe
-                        Log.d("GuardaPlay", "Iframe interno trovato: $finalUrl")
-                        // Ora passiamo l'URL dell'iframe agli estrattori (Voe, Vidhide, ecc.)
-                        loadExtractor(finalUrl, src, subtitleCallback, callback)
-                    }
-                    
-                    // Cerchiamo anche m3u8 diretti nel codice dell'embed
-                    val m3u8Regex = Regex("""https?[:\\]+[/\\\w\d\.-]+\.m3u8(?:\?v=[\d]+)?""")
-                    m3u8Regex.findAll(innerPage.html()).forEach { match ->
-                        callback.invoke(
-                            newExtractorLink("GuardaPlay", "HD Player", match.value.replace("\\/", "/"), ExtractorLinkType.M3U8) {
-                                this.quality = Qualities.P1080.value
-                                this.referer = src
-                            }
-                        )
+                        processFinalUrl(finalUrl, src, callback)
                     }
                 } catch (e: Exception) {
-                    Log.e("GuardaPlay", "Errore nell'embed: ${e.message}")
+                    Log.e("GuardaPlay", "Errore embed: ${e.message}")
                 }
             } else {
-                // Se è già un link a un hoster noto, lo carichiamo direttamente
-                loadExtractor(src, data, subtitleCallback, callback)
+                processFinalUrl(src, data, callback)
             }
         }
         return true
+    }
+
+    private suspend fun processFinalUrl(url: String, referer: String, callback: (ExtractorLink) -> Unit) {
+        Log.d("GuardaPlay", "Processo URL finale: $url")
+        
+        // Se è LoadM o Pancast, dobbiamo scavare per l'M3U8
+        if (url.contains("loadm.cam") || url.contains("pancast.net")) {
+            val res = app.get(url, referer = referer).text
+            val m3u8Regex = Regex("""(https?.*?\.m3u8.*?)["']""")
+            m3u8Regex.findAll(res).forEach { match ->
+                val videoUrl = match.groupValues[1].replace("\\/", "/")
+                callback.invoke(
+                    newExtractorLink("GuardaPlay", "Server HD", videoUrl, ExtractorLinkType.M3U8) {
+                        this.quality = Qualities.P1080.value
+                        this.referer = url
+                    }
+                )
+            }
+        } else {
+            // Altrimenti prova con gli estrattori standard (Voe, Vidhide, ecc.)
+            loadExtractor(url, referer, { }, callback)
+        }
     }
 }
