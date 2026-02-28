@@ -2,6 +2,9 @@ package com.guardaplay
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
+import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.utils.ExtractorLinkType
+import com.lagradost.cloudstream3.utils.Qualities
 import org.jsoup.nodes.Element
 
 class GuardaPlayProvider : MainAPI() {
@@ -17,14 +20,15 @@ class GuardaPlayProvider : MainAPI() {
         "$mainUrl/category/azione/" to "Azione",
         "$mainUrl/category/commedia/" to "Commedia",
         "$mainUrl/category/dramma/" to "Dramma",
-        "$mainUrl/category/horror/" to "Horror"
+        "$mainUrl/category/horror/" to "Horror",
+        "$mainUrl/category/fantascienza/" to "Fantascienza"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = if (page <= 1) request.data else "${request.data}page/$page/"
         val document = app.get(url).document
         
-        // Selettore aggiornato basato su posterhome.txt
+        // Analisi basata su posterhome.txt: ogni film è in un li.movies
         val home = document.select("li.movies").mapNotNull {
             it.toSearchResult()
         }
@@ -34,10 +38,14 @@ class GuardaPlayProvider : MainAPI() {
     private fun Element.toSearchResult(): SearchResponse? {
         val title = selectFirst(".entry-title")?.text() ?: return null
         val href = selectFirst("a.lnk-blk")?.attr("href") ?: return null
-        val posterUrl = selectFirst("img")?.attr("src")?.let { 
-            if (it.startsWith("//")) "https:$it" else it 
+        
+        // Gestione poster: spesso i link iniziano con // (TMDB)
+        var posterUrl = selectFirst("img")?.attr("src")
+        if (posterUrl?.startsWith("//") == true) {
+            posterUrl = "https:$posterUrl"
         }
-        val year = selectFirst(".year")?.text()?.toIntOrNull()
+        
+        val year = selectFirst(".year")?.text()?.trim()?.toIntOrNull()
 
         return newMovieSearchResponse(title, href, TvType.Movie) {
             this.posterUrl = posterUrl
@@ -56,9 +64,11 @@ class GuardaPlayProvider : MainAPI() {
         val document = app.get(url).document
 
         val title = document.selectFirst("h1.entry-title")?.text() ?: ""
-        val poster = document.selectFirst(".post-thumbnail img")?.attr("src")
+        var poster = document.selectFirst(".post-thumbnail img")?.attr("src")
+        if (poster?.startsWith("//") == true) poster = "https:$poster"
+        
         val plot = document.selectFirst(".description p")?.text()
-        val year = document.selectFirst("span.year")?.text()?.toIntOrNull()
+        val year = document.selectFirst("span.year")?.text()?.trim()?.toIntOrNull()
 
         return newMovieLoadResponse(title, url, TvType.Movie, url) {
             this.posterUrl = poster
@@ -73,37 +83,46 @@ class GuardaPlayProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val document = app.get(data).document
-        
-        // 1. Cerca iframe (per LoadM o altri server)
+        val response = app.get(data)
+        val document = response.document
+        val html = response.text
+
+        // 1. GESTIONE LOADM (dal file filmdopoframe.txt)
         document.select("iframe").forEach { iframe ->
             val src = iframe.attr("src")
             if (src.contains("loadm.cam")) {
-                val frameRes = app.get(src, referer = data).text
-                // Estrae il file master.m3u8 dal sorgente del player
-                val m3u8 = Regex("""src\s*:\s*["'](https?://[^"']+\.m3u8[^"']*)""").find(frameRes)?.groupValues?.get(1)
-                if (m3u8 != null) {
-                    callback.invoke(
-                        ExtractorLink(
-                            "LoadM",
-                            "LoadM",
-                            m3u8,
-                            referer = "https://loadm.cam/",
-                            quality = Qualities.P1080.value,
-                            isM3u8 = true
+                try {
+                    val frameRes = app.get(src, referer = data).text
+                    // Cerchiamo il link master.m3u8 nel sorgente del player
+                    val m3u8Regex = Regex("""src\s*:\s*["'](https?://[^"']+\.m3u8[^"']*)""").find(frameRes)
+                    val finalUrl = m3u8Regex?.groupValues?.get(1)
+
+                    if (finalUrl != null) {
+                        callback.invoke(
+                            newExtractorLink(
+                                source = "LoadM",
+                                name = "LoadM",
+                                url = finalUrl.replace("\\/", "/"),
+                                referer = "https://loadm.cam/",
+                                quality = Qualities.P1080.value,
+                                type = ExtractorLinkType.M3U8
+                            )
                         )
-                    )
+                    }
+                } catch (e: Exception) {
+                    // Errore nel caricamento del frame, proseguiamo
                 }
-            } else if (src.isNotEmpty()) {
+            } else if (src.isNotEmpty() && !src.contains("google") && !src.contains("youtube")) {
+                // Altri iframe (Mixdrop, Streamtape, ecc.)
                 loadExtractor(src, data, subtitleCallback, callback)
             }
         }
 
-        // 2. Fallback: cerca link diretti nel JS della pagina
-        val html = document.html()
-        val regex = Regex("""https?://(?:vidhide|voe|streamwish|mixdrop|filemoon|ryderjet|vood)[^\s"'<>\\\/]+""")
+        // 2. RICERCA LINK DIRETTI NEL JS (VOE, VIDHIDE, ETC)
+        val regex = Regex("""https?://(?:vidhide|voe|streamwish|mixdrop|filemoon|ryderjet|vood|embedwish)[^\s"'<>\\\/]+""")
         regex.findAll(html).forEach { match ->
-            loadExtractor(match.value.replace("\\/", "/"), data, subtitleCallback, callback)
+            val cleanUrl = match.value.replace("\\/", "/")
+            loadExtractor(cleanUrl, data, subtitleCallback, callback)
         }
 
         return true
