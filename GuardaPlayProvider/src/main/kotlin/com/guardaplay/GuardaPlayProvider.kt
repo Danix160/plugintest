@@ -2,6 +2,7 @@ package com.guardaplay
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
+import com.lagradost.cloudstream3.utils.ExtractorLink
 import org.jsoup.nodes.Element
 
 class GuardaPlayProvider : MainAPI() {
@@ -37,15 +38,12 @@ class GuardaPlayProvider : MainAPI() {
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        // Cerca il link: può essere nel tag 'a' o nell'elemento padre
         val href = this.selectFirst("a")?.attr("href") 
             ?: this.parent()?.selectFirst("a")?.attr("href") ?: return null
             
-        // Estrae il titolo dal tag 'alt' dell'immagine (es: "Image Accused" -> "Accused")
         val title = this.selectFirst("img")?.attr("alt")?.replace("Image ", "")?.trim()
             ?: this.selectFirst(".entry-title")?.text() ?: "Senza Titolo"
         
-        // Gestione immagine con protocollo // o path relativi
         val imgElement = this.selectFirst("img")
         val posterUrl = imgElement?.let {
             val src = it.attr("src").ifEmpty { it.attr("data-src") }
@@ -89,24 +87,23 @@ class GuardaPlayProvider : MainAPI() {
         val response = app.get(data, headers = commonHeaders)
         val html = response.text
 
-        // 1. ESTRAZIONE VIDSTACK (Il file .txt visto nel player)
-        // Questo regex cattura il link cf-master.xxxx.txt che è un M3U8
+        // 1. ESTRAZIONE VIDSTACK (Il file .txt visto nel player che funge da M3U8)
         val vidstackRegex = Regex("""src=["'](https?://[^"']+/v4/xq/[^"']+\.txt)["']""")
         vidstackRegex.findAll(html).forEach { match ->
             val streamUrl = match.groupValues[1]
             callback.invoke(
                 newExtractorLink(
-                    "LoadM (Vidstack)",
-                    "LoadM Server HQ",
-                    streamUrl,
-                    "https://loadm.cam/",
-                    Qualities.P1080.value,
+                    name = "LoadM (Vidstack)",
+                    source = "LoadM Server HQ",
+                    url = streamUrl,
+                    referer = "https://loadm.cam/",
+                    quality = Qualities.P1080.value,
                     type = ExtractorLinkType.M3U8
                 )
             )
         }
 
-        // 2. METODO API TRADIZIONALE (Se l'ID è presente nel JS o iframe)
+        // 2. METODO API TRADIZIONALE LOADM
         val videoId = Regex("""video_id\s*[:=]\s*["']([^"']+)""").find(html)?.groupValues?.get(1)
             ?: Regex("""/e/([^"'?]+)""").find(html)?.groupValues?.get(1)
 
@@ -120,14 +117,15 @@ class GuardaPlayProvider : MainAPI() {
                 
                 val finalUrl = Regex("""https?://[^\s"'<>]+(?:\.m3u8|\.mp4)[^\s"'<>]*""").find(apiRes)?.value
                 if (finalUrl != null) {
+                    val cleanUrl = finalUrl.replace("\\/", "/")
                     callback.invoke(
                         newExtractorLink(
-                            "LoadM API",
-                            "LoadM Server",
-                            finalUrl.replace("\\/", "/"),
-                            "https://loadm.cam/",
-                            Qualities.P1080.value,
-                            type = if (finalUrl.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                            name = "LoadM API",
+                            source = "LoadM Server",
+                            url = cleanUrl,
+                            referer = "https://loadm.cam/",
+                            quality = Qualities.P1080.value,
+                            type = if (cleanUrl.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
                         )
                     )
                 }
