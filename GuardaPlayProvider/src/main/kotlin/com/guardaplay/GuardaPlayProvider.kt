@@ -2,13 +2,16 @@ package com.guardaplay
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.api.Log
 import org.jsoup.nodes.Element
 import java.net.URI
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
+
+// =============================================================================
+// PROVIDER PRINCIPALE: GuardaPlay
+// =============================================================================
 
 class GuardaPlayProvider : MainAPI() {
     override var mainUrl = "https://guardaplay.space"
@@ -71,15 +74,11 @@ class GuardaPlayProvider : MainAPI() {
         val document = app.get(data).document
         var foundAny = false
 
-        // 1. Cerchiamo i bottoni del player (opzioni multiple)
         val options = document.select("li.dooplay_player_option")
-        
-        // 2. Se non ci sono bottoni, proviamo a estrarre i dati dai metadati della pagina (quelli del tasto "Play" fantasma)
         val fallbackPost = document.selectFirst("div#player")?.attr("data-post") 
             ?: document.selectFirst("link[rel='shortlink']")?.attr("href")?.substringAfter("p=")
 
         if (options.isEmpty() && fallbackPost != null) {
-            // Simuliamo il caricamento della prima opzione (nume=1, type=0 è lo standard di DooPlay)
             if (fetchDooPlayAjax(fallbackPost, "1", "0", data, subtitleCallback, callback)) foundAny = true
         }
 
@@ -87,7 +86,6 @@ class GuardaPlayProvider : MainAPI() {
             val post = option.attr("data-post")
             val nume = option.attr("data-nume")
             val type = option.attr("data-type")
-            
             if (fetchDooPlayAjax(post, nume, type, data, subtitleCallback, callback)) foundAny = true
         }
 
@@ -115,7 +113,6 @@ class GuardaPlayProvider : MainAPI() {
                 headers = mapOf("X-Requested-With" to "XMLHttpRequest")
             ).text
 
-            // Estraiamo l'URL dall'iframe contenuto nella risposta AJAX
             val iframeUrl = Regex("""(?:src|href)\s*[:=]\s*["']([^"']+)["']""").find(response)?.groupValues?.get(1)
                 ?: Regex("""https?://[^\s"']+""").find(response)?.value
 
@@ -135,7 +132,6 @@ class GuardaPlayProvider : MainAPI() {
     ): Boolean {
         val cleanUrl = url.replace("\\/", "/").let { if (it.startsWith("//")) "https:$it" else it }
         
-        // Se l'URL punta direttamente a vidstack o server1.uns.bio, usiamo il nostro estrattore
         return if (cleanUrl.contains("server1.uns.bio") || cleanUrl.contains("vidstack")) {
             VidStack().getUrl(cleanUrl, referer, subtitleCallback, callback)
             true
@@ -146,7 +142,7 @@ class GuardaPlayProvider : MainAPI() {
 }
 
 // =============================================================================
-// ESTRATTORE: VidStack (Senza modifiche rispetto alla versione funzionante)
+// ESTRATTORE: VidStack (Corretto per compilazione)
 // =============================================================================
 
 open class VidStack : ExtractorApi() {
@@ -176,8 +172,17 @@ open class VidStack : ExtractorApi() {
         } ?: return
 
         Regex("\"source\":\"(.*?)\"").find(decryptedText)?.groupValues?.get(1)?.replace("\\/", "/")?.let { m3u8 ->
+            // FIX: Utilizzo corretto di newExtractorLink per evitare l'errore di tipi
             callback.invoke(
-                newExtractorLink(this.name, this.name, m3u8, url, Qualities.P1080.value, true)
+                newExtractorLink(
+                    source = this.name,
+                    name = this.name,
+                    url = m3u8,
+                    type = ExtractorLinkType.M3U8
+                ) {
+                    this.quality = Qualities.P1080.value
+                    this.referer = url
+                }
             )
         }
 
