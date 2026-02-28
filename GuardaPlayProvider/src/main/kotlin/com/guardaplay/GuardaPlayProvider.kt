@@ -82,21 +82,24 @@ class GuardaPlayProvider : MainAPI() {
         val document = response.document
         val html = response.text
 
-        // 1. GESTIONE LOADM
+        // 1. GESTIONE PLAYER NATIVO (LOADM / PANCAST)
         document.select("iframe").forEach { iframe ->
-            val src = iframe.attr("src")
-            if (src.contains("loadm.cam")) {
+            // Cerchiamo src o data-src per il lazy loading
+            var src = iframe.attr("src").ifEmpty { iframe.attr("data-src") }
+            if (src.startsWith("//")) src = "https:$src"
+
+            if (src.contains("loadm.cam") || src.contains("pancast.net")) {
                 try {
                     val frameRes = app.get(src, referer = data).text
-                    val m3u8Regex = Regex("""src\s*:\s*["'](https?://[^"']+\.m3u8[^"']*)""").find(frameRes)
+                    // Regex per catturare il link master.m3u8 all'interno del sorgente del frame
+                    val m3u8Regex = Regex("""["'](https?://[^"']+\.m3u8[^"']*)["']""").find(frameRes)
                     val finalUrl = m3u8Regex?.groupValues?.get(1)
 
                     if (finalUrl != null) {
-                        // FIX: Spostati referer e quality nel blocco lambda {}
                         callback.invoke(
                             newExtractorLink(
-                                source = "LoadM",
-                                name = "LoadM",
+                                source = "GuardaPlay",
+                                name = "Player Alta Qualità",
                                 url = finalUrl.replace("\\/", "/"),
                                 type = ExtractorLinkType.M3U8
                             ) {
@@ -111,9 +114,10 @@ class GuardaPlayProvider : MainAPI() {
             }
         }
 
-        // 2. RICERCA LINK DIRETTI
-        val regex = Regex("""https?://(?:vidhide|voe|streamwish|mixdrop|filemoon|ryderjet|vood|embedwish)[^\s"'<>\\\/]+""")
-        regex.findAll(html).forEach { match ->
+        // 2. RICERCA AUTOMATICA ESTRATTORI (Vidhide, Voe, Mixdrop, ecc.)
+        // Questa regex analizza tutto l'HTML alla ricerca di link di video hoster conosciuti
+        val hosterRegex = Regex("""https?://(?:vidhide|voe|streamwish|mixdrop|filemoon|ryderjet|vood|embedwish|wolfstream|dood|streamtape)[^\s"'<>\\\/]+""")
+        hosterRegex.findAll(html).forEach { match ->
             val cleanUrl = match.value.replace("\\/", "/")
             loadExtractor(cleanUrl, data, subtitleCallback, callback)
         }
