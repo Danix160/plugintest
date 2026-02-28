@@ -14,11 +14,70 @@ class GuardaPlayProvider : MainAPI() {
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
 
     private val commonHeaders = mapOf(
-        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-        "Referer" to "$mainUrl/"
+        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Referer" to "$mainUrl/",
+        "Accept-Language" to "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7"
     )
 
-    // ... (omesse le parti di ricerca e caricamento dei dettagli per brevità)
+    override val mainPage = mainPageOf(
+        "$mainUrl/" to "Ultimi Film",
+        "$mainUrl/category/animazione/" to "Animazione",
+        "$mainUrl/category/azione/" to "Azione",
+        "$mainUrl/category/fantascienza/" to "Fantascienza"
+    )
+
+    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
+        val url = if (page <= 1) request.data else "${request.data}page/$page/"
+        val response = app.get(url, headers = commonHeaders)
+        val document = response.document
+        
+        val items = document.select("article, .post, .item, .post-thumbnail").mapNotNull { 
+            it.toSearchResult()
+        }
+        
+        return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
+    }
+
+    private fun Element.toSearchResult(): SearchResponse? {
+        val href = this.selectFirst("a")?.attr("href") 
+            ?: this.parent()?.selectFirst("a")?.attr("href") ?: return null
+            
+        val title = this.selectFirst("img")?.attr("alt")?.replace("Image ", "")?.trim()
+            ?: this.selectFirst(".entry-title")?.text() ?: "Senza Titolo"
+        
+        val imgElement = this.selectFirst("img")
+        val posterUrl = imgElement?.let {
+            val src = it.attr("src").ifEmpty { it.attr("data-src") }
+            when {
+                src.startsWith("//") -> "https:$src"
+                src.startsWith("/") -> "https://image.tmdb.org/t/p/w500$src"
+                else -> src
+            }
+        }
+
+        return newMovieSearchResponse(title, href, TvType.Movie) { 
+            this.posterUrl = posterUrl 
+        }
+    }
+
+    override suspend fun search(query: String): List<SearchResponse> {
+        val document = app.get("$mainUrl/?s=$query", headers = commonHeaders).document
+        return document.select("article, .post, .post-thumbnail").mapNotNull { it.toSearchResult() }
+    }
+
+    override suspend fun load(url: String): LoadResponse {
+        val document = app.get(url, headers = commonHeaders).document
+        val title = document.selectFirst("h1.entry-title")?.text()?.trim() ?: ""
+        val poster = document.selectFirst(".post-thumbnail img")?.attr("src")
+        val year = document.selectFirst(".year")?.text()?.filter { it.isDigit() }?.toIntOrNull()
+        val plot = document.selectFirst(".description p, .entry-content p")?.text()
+
+        return newMovieLoadResponse(title, url, TvType.Movie, url) {
+            this.posterUrl = poster
+            this.year = year
+            this.plot = plot
+        }
+    }
 
     override suspend fun loadLinks(
         data: String,
