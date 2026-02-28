@@ -9,10 +9,6 @@ import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
-// =============================================================================
-// PROVIDER PRINCIPALE: GuardaPlay
-// =============================================================================
-
 class GuardaPlayProvider : MainAPI() {
     override var mainUrl = "https://guardaplay.space"
     override var name = "GuardaPlay"
@@ -32,7 +28,6 @@ class GuardaPlayProvider : MainAPI() {
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = if (page <= 1) request.data else "${request.data}page/$page/"
         val document = app.get(url).document
-        // "article.movies" evita i doppioni rispetto a "li.movies"
         val home = document.select("article.movies").mapNotNull { it.toSearchResult() }
         return newHomePageResponse(request.name, home)
     }
@@ -75,7 +70,6 @@ class GuardaPlayProvider : MainAPI() {
         val document = app.get(data).document
         var foundAny = false
 
-        // 1. Gestione AJAX DooPlay
         document.select("li.dooplay_player_option").forEach { option ->
             val post = option.attr("data-post")
             val nume = option.attr("data-nume")
@@ -94,7 +88,6 @@ class GuardaPlayProvider : MainAPI() {
                     headers = mapOf("X-Requested-With" to "XMLHttpRequest")
                 ).text
 
-                // Cerchiamo l'URL dell'iframe nella risposta
                 val iframeUrl = Regex("""<iframe.*?src=["'](.*?)["']""").find(response)?.groupValues?.get(1)
                     ?: Regex("""https?://[^\s"']+""").find(response)?.value
 
@@ -115,19 +108,17 @@ class GuardaPlayProvider : MainAPI() {
         val cleanUrl = url.replace("\\/", "/").let { if (it.startsWith("//")) "https:$it" else it }
         
         return when {
-            // Se il link punta ai server Vidstack (quelli con AES)
             cleanUrl.contains("server1.uns.bio") || cleanUrl.contains("vidstack") -> {
                 Server1uns().getUrl(cleanUrl, referer, subtitleCallback, callback)
                 true
             }
-            // Fallback per altri estrattori comuni (Voe, Vidhide, ecc)
             else -> loadExtractor(cleanUrl, referer, subtitleCallback, callback)
         }
     }
 }
 
 // =============================================================================
-// ESTRATTORE: VidStack / Server1uns (Gestione AES)
+// EXTRACTOR FIXATO
 // =============================================================================
 
 open class VidStack : ExtractorApi() {
@@ -154,14 +145,20 @@ open class VidStack : ExtractorApi() {
             try { AesHelper.decryptAES(encoded, key, iv) } catch (e: Exception) { null }
         } ?: return
 
-        // Estrazione link video
         Regex("\"source\":\"(.*?)\"").find(decryptedText)?.groupValues?.get(1)?.replace("\\/", "/")?.let { m3u8 ->
+            // FIX: Utilizzo corretto della firma di newExtractorLink
             callback.invoke(
-                newExtractorLink(this.name, this.name, m3u8, url, Qualities.P1080.value, true)
+                newExtractorLink(
+                    source = this.name,
+                    name = this.name,
+                    url = m3u8,
+                    referer = url,
+                    quality = Qualities.P1080.value,
+                    type = ExtractorLinkType.M3U8
+                )
             )
         }
 
-        // Estrazione sottotitoli
         val subtitleSection = Regex("\"subtitle\":\\{(.*?)\\}").find(decryptedText)?.groupValues?.get(1)
         subtitleSection?.let { section ->
             Regex("\"([^\"]+)\":\\s*\"([^\"]+)\"").findAll(section).forEach { match ->
