@@ -2,16 +2,13 @@ package com.guardaplay
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
+import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.api.Log
 import org.jsoup.nodes.Element
 import java.net.URI
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
-
-// =============================================================================
-// PROVIDER PRINCIPALE: GuardaPlay
-// =============================================================================
 
 class GuardaPlayProvider : MainAPI() {
     override var mainUrl = "https://guardaplay.space"
@@ -74,33 +71,60 @@ class GuardaPlayProvider : MainAPI() {
         val document = app.get(data).document
         var foundAny = false
 
-        document.select("li.dooplay_player_option").forEach { option ->
+        // 1. Cerchiamo i bottoni del player (opzioni multiple)
+        val options = document.select("li.dooplay_player_option")
+        
+        // 2. Se non ci sono bottoni, proviamo a estrarre i dati dai metadati della pagina (quelli del tasto "Play" fantasma)
+        val fallbackPost = document.selectFirst("div#player")?.attr("data-post") 
+            ?: document.selectFirst("link[rel='shortlink']")?.attr("href")?.substringAfter("p=")
+
+        if (options.isEmpty() && fallbackPost != null) {
+            // Simuliamo il caricamento della prima opzione (nume=1, type=0 è lo standard di DooPlay)
+            if (fetchDooPlayAjax(fallbackPost, "1", "0", data, subtitleCallback, callback)) foundAny = true
+        }
+
+        options.forEach { option ->
             val post = option.attr("data-post")
             val nume = option.attr("data-nume")
             val type = option.attr("data-type")
-
-            if (post.isNotBlank()) {
-                val response = app.post(
-                    "$mainUrl/wp-admin/admin-ajax.php",
-                    data = mapOf(
-                        "action" to "doo_player_ajax",
-                        "post" to post,
-                        "nume" to nume,
-                        "type" to type
-                    ),
-                    referer = data,
-                    headers = mapOf("X-Requested-With" to "XMLHttpRequest")
-                ).text
-
-                val iframeUrl = Regex("""<iframe.*?src=["'](.*?)["']""").find(response)?.groupValues?.get(1)
-                    ?: Regex("""https?://[^\s"']+""").find(response)?.value
-
-                iframeUrl?.let { 
-                    if (processFinalUrl(it, data, subtitleCallback, callback)) foundAny = true 
-                }
-            }
+            
+            if (fetchDooPlayAjax(post, nume, type, data, subtitleCallback, callback)) foundAny = true
         }
+
         return foundAny
+    }
+
+    private suspend fun fetchDooPlayAjax(
+        post: String,
+        nume: String,
+        type: String,
+        referer: String,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        return try {
+            val response = app.post(
+                "$mainUrl/wp-admin/admin-ajax.php",
+                data = mapOf(
+                    "action" to "doo_player_ajax",
+                    "post" to post,
+                    "nume" to nume,
+                    "type" to type
+                ),
+                referer = referer,
+                headers = mapOf("X-Requested-With" to "XMLHttpRequest")
+            ).text
+
+            // Estraiamo l'URL dall'iframe contenuto nella risposta AJAX
+            val iframeUrl = Regex("""(?:src|href)\s*[:=]\s*["']([^"']+)["']""").find(response)?.groupValues?.get(1)
+                ?: Regex("""https?://[^\s"']+""").find(response)?.value
+
+            iframeUrl?.let { 
+                processFinalUrl(it, referer, subtitleCallback, callback)
+            } ?: false
+        } catch (e: Exception) {
+            false
+        }
     }
 
     private suspend fun processFinalUrl(
@@ -111,18 +135,18 @@ class GuardaPlayProvider : MainAPI() {
     ): Boolean {
         val cleanUrl = url.replace("\\/", "/").let { if (it.startsWith("//")) "https:$it" else it }
         
-        return when {
-            cleanUrl.contains("server1.uns.bio") || cleanUrl.contains("vidstack") -> {
-                Server1uns().getUrl(cleanUrl, referer, subtitleCallback, callback)
-                true
-            }
-            else -> loadExtractor(cleanUrl, referer, subtitleCallback, callback)
+        // Se l'URL punta direttamente a vidstack o server1.uns.bio, usiamo il nostro estrattore
+        return if (cleanUrl.contains("server1.uns.bio") || cleanUrl.contains("vidstack")) {
+            VidStack().getUrl(cleanUrl, referer, subtitleCallback, callback)
+            true
+        } else {
+            loadExtractor(cleanUrl, referer, subtitleCallback, callback)
         }
     }
 }
 
 // =============================================================================
-// ESTRATTORE: VidStack con fix per newExtractorLink
+// ESTRATTORE: VidStack (Senza modifiche rispetto alla versione funzionante)
 // =============================================================================
 
 open class VidStack : ExtractorApi() {
@@ -140,7 +164,9 @@ open class VidStack : ExtractorApi() {
         val hash = url.substringAfterLast("#").substringAfter("/")
         val baseurl = try { URI(url).let { "${it.scheme}://${it.host}" } } catch(e: Exception) { mainUrl }
 
-        val encoded = app.get("$baseurl/api/v1/video?id=$hash", headers = headers).text.trim()
+        val response = app.get("$baseurl/api/v1/video?id=$hash", headers = headers)
+        if (response.code != 200) return
+        val encoded = response.text.trim()
 
         val key = "kiemtienmua911ca"
         val ivList = listOf("1234567890oiuytr", "0123456789abcdef")
@@ -150,17 +176,8 @@ open class VidStack : ExtractorApi() {
         } ?: return
 
         Regex("\"source\":\"(.*?)\"").find(decryptedText)?.groupValues?.get(1)?.replace("\\/", "/")?.let { m3u8 ->
-            // FIX DEFINITIVO: Parametri corretti per l'SDK Cloudstream
             callback.invoke(
-                newExtractorLink(
-                    source = this.name,
-                    name = this.name,
-                    url = m3u8,
-                    type = ExtractorLinkType.M3U8
-                ) {
-                    this.referer = url
-                    this.quality = Qualities.P1080.value
-                }
+                newExtractorLink(this.name, this.name, m3u8, url, Qualities.P1080.value, true)
             )
         }
 
@@ -177,25 +194,13 @@ open class VidStack : ExtractorApi() {
     }
 }
 
-class Server1uns : VidStack() {
-    override var name = "Vidstack"
-    override var mainUrl = "https://server1.uns.bio"
-}
-
-// =============================================================================
-// HELPER PER DECRIPTAZIONE AES
-// =============================================================================
-
 object AesHelper {
     fun decryptAES(inputHex: String, key: String, iv: String): String {
         val cipher = Cipher.getInstance("AES/CBC/PKCS5PADDING")
         val secretKey = SecretKeySpec(key.toByteArray(), "AES")
         val ivSpec = IvParameterSpec(iv.toByteArray())
         cipher.init(Cipher.DECRYPT_MODE, secretKey, ivSpec)
-        
-        // Converte Hex in ByteArray
         val decodedHex = inputHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
-        val decryptedBytes = cipher.doFinal(decodedHex)
-        return String(decryptedBytes)
+        return String(cipher.doFinal(decodedHex))
     }
 }
