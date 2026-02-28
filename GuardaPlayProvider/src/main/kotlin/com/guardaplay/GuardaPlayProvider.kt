@@ -18,13 +18,15 @@ class GuardaPlayProvider : MainAPI() {
         "$mainUrl/" to "Ultimi Film",
         "$mainUrl/category/animazione/" to "Animazione",
         "$mainUrl/category/azione/" to "Azione",
-        "$mainUrl/category/commedia/" to "Commedia"
+        "$mainUrl/category/commedia/" to "Commedia",
+        "$mainUrl/category/fantascienza/" to "Fantascienza",
+        "$mainUrl/category/horror/" to "Horror"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = if (page <= 1) request.data else "${request.data}page/$page/"
         val document = app.get(url).document
-        val home = document.select("li.movies").mapNotNull { it.toSearchResult() }
+        val home = document.select("li.movies, article.movies").mapNotNull { it.toSearchResult() }
         return newHomePageResponse(request.name, home)
     }
 
@@ -38,7 +40,7 @@ class GuardaPlayProvider : MainAPI() {
         val title = selectFirst(".entry-title")?.text() ?: return null
         val href = selectFirst("a.lnk-blk")?.attr("href") ?: return null
         
-        // FIX POSTER: Forza protocollo HTTPS per evitare FileNotFoundException
+        // Fix protocollo poster
         val posterUrl = selectFirst("img")?.attr("src")?.let { 
             if (it.startsWith("//")) "https:$it" else it 
         }
@@ -53,10 +55,13 @@ class GuardaPlayProvider : MainAPI() {
         val document = response.document
         val title = document.selectFirst("h1.entry-title")?.text() ?: ""
         
+        val pUrl = document.selectFirst(".post-thumbnail img")?.attr("src")
+        val poster = if (pUrl?.startsWith("//") == true) "https:$pUrl" else pUrl
+        val plot = document.selectFirst(".description p")?.text()
+
         return newMovieLoadResponse(title, url, TvType.Movie, url) {
-            val pUrl = document.selectFirst(".post-thumbnail img")?.attr("src")
-            this.posterUrl = if (pUrl?.startsWith("//") == true) "https:$pUrl" else pUrl
-            this.plot = document.selectFirst(".description p")?.text()
+            this.posterUrl = poster
+            this.plot = plot
         }
     }
 
@@ -66,60 +71,56 @@ class GuardaPlayProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        Log.d("GuardaPlay", "Avvio caricamento link per: $data")
-        val response = app.get(data)
-        val document = response.document
+        Log.d("GuardaPlay", "Ricerca link per: $data")
+        
+        val response = app.get(data, headers = mapOf("User-Agent" to clientUserAgent))
         val html = response.text
+        val document = response.document
 
-        // 1. RICERCA NEGLI IFRAME CON LOGGING
-        document.select("iframe").forEach { iframe ->
-            var src = iframe.attr("src").ifEmpty { iframe.attr("data-src") }.ifEmpty { iframe.attr("data-litespeed-src") }
-            if (src.startsWith("//")) src = "https:$src"
-
-            if (src.contains("loadm.cam") || src.contains("pancast.net")) {
-                Log.d("GuardaPlay", "Trovato iframe critico: $src")
-                try {
-                    val frameRes = app.get(
-                        src, 
-                        referer = data, 
-                        headers = mapOf("User-Agent" to clientUserAgent)
-                    ).text
-
-                    // Logghiamo una parte del contenuto per debug (primi 500 caratteri)
-                    Log.d("GuardaPlay", "Contenuto Frame (estratto): ${frameRes.take(500)}")
-
-                    // Regex potenziata per link m3u8 codificati o normali
-                    val m3u8Regex = Regex("""https?[:\\]+[/\\\w\d\.-]+\.m3u8(?:\?v=[\d]+)?""")
-                    val m3u8Raw = m3u8Regex.find(frameRes)?.value?.replace("\\/", "/")
-
-                    if (m3u8Raw != null) {
-                        Log.d("GuardaPlay", "M3U8 TROVATO: $m3u8Raw")
-                        callback.invoke(
-                            newExtractorLink(
-                                source = "GuardaPlay",
-                                name = "Player HD",
-                                url = m3u8Raw,
-                                type = ExtractorLinkType.M3U8
-                            ) {
-                                this.quality = Qualities.P1080.value
-                                this.referer = "https://loadm.cam/"
-                            }
-                        )
-                    } else {
-                        Log.w("GuardaPlay", "Nessun m3u8 trovato nel frame!")
-                    }
-                } catch (e: Exception) {
-                    Log.e("GuardaPlay", "Errore durante l'estrazione dal frame: ${e.message}")
+        // 1. Ricerca link M3U8 diretti (Regex globale)
+        val m3u8Regex = Regex("""https?[:\\]+[/\\\w\d\.-]+\.m3u8(?:\?v=[\d]+)?""")
+        m3u8Regex.findAll(html).forEach { match ->
+            val url = match.value.replace("\\/", "/")
+            Log.d("GuardaPlay", "M3U8 diretto: $url")
+            callback.invoke(
+                newExtractorLink("GuardaPlay", "HD Player", url, ExtractorLinkType.M3U8) {
+                    this.quality = Qualities.P1080.value
+                    this.referer = "https://loadm.cam/"
                 }
-            }
+            )
         }
 
-        // 2. PIANO B: ESTRATTORI UNIVERSALI
-        val hosterRegex = Regex("""https?://(?:vidhide|voe|streamwish|mixdrop|filemoon|ryderjet|vood|embedwish|wolfstream|dood|streamtape)[^\s"'<>\\\/]+""")
-        hosterRegex.findAll(html).forEach { match ->
-            val cleanUrl = match.value.replace("\\/", "/")
-            Log.d("GuardaPlay", "Trovato hoster esterno: $cleanUrl")
-            loadExtractor(cleanUrl, data, subtitleCallback, callback)
+        // 2. Analisi Elementi Iframe e Lazy-Load (LiteSpeed)
+        document.select("iframe, div[data-src], div[data-litespeed-src]").forEach { element ->
+            var src = element.attr("src")
+                .ifEmpty { element.attr("data-src") }
+                .ifEmpty { element.attr("data-litespeed-src") }
+            
+            if (src.isBlank()) return@forEach
+            if (src.startsWith("//")) src = "https:$src"
+
+            Log.d("GuardaPlay", "Sorgente trovata: $src")
+
+            // Se è un hoster esterno noto
+            if (src.contains(Regex("vidhide|voe|streamwish|mixdrop|filemoon|vood|dood|streamtape"))) {
+                loadExtractor(src, data, subtitleCallback, callback)
+            } 
+            // Se è il player proprietario (LoadM / Pancast)
+            else if (src.contains("loadm.cam") || src.contains("pancast.net")) {
+                try {
+                    val frameHtml = app.get(src, referer = data).text
+                    m3u8Regex.find(frameHtml)?.value?.let { directUrl ->
+                        callback.invoke(
+                            newExtractorLink("GuardaPlay", "HD Player", directUrl.replace("\\/", "/"), ExtractorLinkType.M3U8) {
+                                this.quality = Qualities.P1080.value
+                                this.referer = src
+                            }
+                        )
+                    }
+                } catch (e: Exception) {
+                    Log.e("GuardaPlay", "Errore estrazione frame: ${e.message}")
+                }
+            }
         }
 
         return true
