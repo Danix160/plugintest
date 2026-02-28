@@ -2,9 +2,6 @@ package com.guardaplay
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import com.lagradost.cloudstream3.utils.ExtractorLink
-import com.lagradost.cloudstream3.utils.ExtractorLinkType
-import com.lagradost.cloudstream3.utils.Qualities
 import org.jsoup.nodes.Element
 
 class GuardaPlayProvider : MainAPI() {
@@ -14,75 +11,54 @@ class GuardaPlayProvider : MainAPI() {
     override var lang = "it"
     override val hasMainPage = true
 
-    private val commonHeaders = mapOf(
-        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Referer" to "$mainUrl/",
-        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language" to "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7"
-    )
-
     override val mainPage = mainPageOf(
         "$mainUrl/" to "Ultimi Film",
         "$mainUrl/category/animazione/" to "Animazione",
         "$mainUrl/category/azione/" to "Azione",
-        "$mainUrl/category/fantascienza/" to "Fantascienza",
-        "$mainUrl/category/avventura/" to "Avventura"
+        "$mainUrl/category/commedia/" to "Commedia",
+        "$mainUrl/category/dramma/" to "Dramma",
+        "$mainUrl/category/horror/" to "Horror"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = if (page <= 1) request.data else "${request.data}page/$page/"
-        val response = app.get(url, headers = commonHeaders)
-        val document = response.document
+        val document = app.get(url).document
         
-        // Selettore ottimizzato per evitare i duplicati (prende il contenitore li o l'article)
-        val items = document.select("li[id^=post-]").ifEmpty { 
-            document.select("article.post") 
-        }.mapNotNull { 
-            it.toSearchResult() 
+        // Selettore aggiornato basato su posterhome.txt
+        val home = document.select("li.movies").mapNotNull {
+            it.toSearchResult()
         }
-        
-        return newHomePageResponse(request.name, items, hasNext = items.isNotEmpty())
+        return newHomePageResponse(request.name, home)
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        val href = this.selectFirst("a.lnk-blk")?.attr("href") 
-            ?: this.selectFirst("a")?.attr("href") 
-            ?: return null
-
-        val title = this.selectFirst("h2.entry-title")?.text()?.trim()
-            ?: this.selectFirst("img")?.attr("alt")?.replace("Image ", "")
-            ?: return null
-        
-        val img = this.selectFirst("img")
-        val posterUrl = img?.let { 
-            val src = it.attr("src").ifEmpty { it.attr("data-src") }
-            if (src.startsWith("//")) "https:$src" else src
+        val title = selectFirst(".entry-title")?.text() ?: return null
+        val href = selectFirst("a.lnk-blk")?.attr("href") ?: return null
+        val posterUrl = selectFirst("img")?.attr("src")?.let { 
+            if (it.startsWith("//")) "https:$it" else it 
         }
+        val year = selectFirst(".year")?.text()?.toIntOrNull()
 
         return newMovieSearchResponse(title, href, TvType.Movie) {
             this.posterUrl = posterUrl
+            this.year = year
         }
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val searchUrl = "$mainUrl/?s=$query"
-        val document = app.get(searchUrl, headers = commonHeaders).document
-        
-        return document.select("li[id^=post-], article.post").mapNotNull { 
-            it.toSearchResult() 
+        val document = app.get("$mainUrl/?s=$query").document
+        return document.select("li.movies").mapNotNull {
+            it.toSearchResult()
         }
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val document = app.get(url, headers = commonHeaders).document
-        
-        val title = document.selectFirst("h1.entry-title")?.text()?.trim() ?: ""
-        val poster = document.selectFirst(".post-thumbnail img, .poster img")?.let { img ->
-            val src = img.attr("src").ifEmpty { img.attr("data-src") }
-            if (src.startsWith("//")) "https:$src" else src
-        }
-        val plot = document.selectFirst(".description p, .entry-content p")?.text()
-        val year = document.selectFirst("span.year")?.text()?.trim()?.toIntOrNull()
+        val document = app.get(url).document
+
+        val title = document.selectFirst("h1.entry-title")?.text() ?: ""
+        val poster = document.selectFirst(".post-thumbnail img")?.attr("src")
+        val plot = document.selectFirst(".description p")?.text()
+        val year = document.selectFirst("span.year")?.text()?.toIntOrNull()
 
         return newMovieLoadResponse(title, url, TvType.Movie, url) {
             this.posterUrl = poster
@@ -97,61 +73,37 @@ class GuardaPlayProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val response = app.get(data, headers = commonHeaders)
-        val html = response.text
-
-        // 1. TENTATIVO API LOADM (Dal file HAR)
-        // Cerchiamo l'ID video (es: 61illa) nel codice JavaScript o negli iframe
-        val videoId = Regex("""(?:id|video_id)["']?\s*[:=]\s*["']([^"']+)""").find(html)?.groupValues?.get(1)
-            ?: Regex("""loadm\.cam/e/([^"'?]+)""").find(html)?.groupValues?.get(1)
-            ?: Regex("""id=([a-zA-Z0-9]{5,})""").find(html)?.groupValues?.get(1)
-
-        if (videoId != null) {
-            val apiUrl = "https://loadm.cam/api/v1/video?id=$videoId&r=guardaplay.space"
-            
-            try {
-                val apiRes = app.get(apiUrl, headers = mapOf(
-                    "Referer" to "https://loadm.cam/",
-                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-                    "X-Requested-With" to "XMLHttpRequest"
-                ))
-
-                val body = apiRes.text
-                // Cerchiamo il link al file m3u8 o mp4
-                val finalUrl = Regex("""https?://[^\s"'<>]+(?:\.m3u8|\.mp4)[^\s"'<>]*""").find(body)?.value 
-                    ?: Regex("""["']file["']\s*:\s*["']([^"']+)""").find(body)?.groupValues?.get(1)
-
-                if (finalUrl != null) {
+        val document = app.get(data).document
+        
+        // 1. Cerca iframe (per LoadM o altri server)
+        document.select("iframe").forEach { iframe ->
+            val src = iframe.attr("src")
+            if (src.contains("loadm.cam")) {
+                val frameRes = app.get(src, referer = data).text
+                // Estrae il file master.m3u8 dal sorgente del player
+                val m3u8 = Regex("""src\s*:\s*["'](https?://[^"']+\.m3u8[^"']*)""").find(frameRes)?.groupValues?.get(1)
+                if (m3u8 != null) {
                     callback.invoke(
-                        newExtractorLink(
+                        ExtractorLink(
                             "LoadM",
-                            "LoadM - Guardaplay",
-                            finalUrl.replace("\\/", "/"),
-                            if (finalUrl.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
-                        ) {
-                            this.quality = Qualities.P1080.value
-                            this.referer = "https://loadm.cam/"
-                        }
+                            "LoadM",
+                            m3u8,
+                            referer = "https://loadm.cam/",
+                            quality = Qualities.P1080.value,
+                            isM3u8 = true
+                        )
                     )
                 }
-            } catch (e: Exception) {
-                // Se l'API fallisce, proseguiamo con gli estrattori standard
+            } else if (src.isNotEmpty()) {
+                loadExtractor(src, data, subtitleCallback, callback)
             }
         }
 
-        // 2. TENTATIVO ESTRATTORI STANDARD (Iframe classici)
-        val doc = response.document
-        doc.select("iframe").forEach { iframe ->
-            val src = iframe.attr("src")
-            if (src.isNotEmpty() && !src.contains("google") && !src.contains("youtube")) {
-                loadExtractor(src, subtitleCallback, callback)
-            }
-        }
-
-        // 3. TENTATIVO RICERCA STRINGHE URL NEL JS
+        // 2. Fallback: cerca link diretti nel JS della pagina
+        val html = document.html()
         val regex = Regex("""https?://(?:vidhide|voe|streamwish|mixdrop|filemoon|ryderjet|vood)[^\s"'<>\\\/]+""")
         regex.findAll(html).forEach { match ->
-            loadExtractor(match.value.replace("\\/", "/"), subtitleCallback, callback)
+            loadExtractor(match.value.replace("\\/", "/"), data, subtitleCallback, callback)
         }
 
         return true
