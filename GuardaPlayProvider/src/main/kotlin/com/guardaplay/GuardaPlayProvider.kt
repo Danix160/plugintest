@@ -94,10 +94,8 @@ class GuardaPlayProvider : MainAPI() {
         val response = app.get(data, headers = commonHeaders)
         val html = response.text
 
-        // 1. ESTRAZIONE DIRETTA PER LOADM (Basata sul traffico analizzato)
         val videoId = Regex("""/e/([a-zA-Z0-9]+)""").find(html)?.groupValues?.get(1)
             ?: Regex("""id["']?\s*[:=]\s*["']([^"']+)""").find(html)?.groupValues?.get(1)
-            ?: Regex("""loadm\.cam/e/([^"'?]+)""").find(html)?.groupValues?.get(1)
 
         if (videoId != null) {
             val apiUrl = "https://loadm.cam/api/v1/video?id=$videoId&r=guardaplay.space"
@@ -106,52 +104,40 @@ class GuardaPlayProvider : MainAPI() {
                 val apiRes = app.get(apiUrl, headers = mapOf(
                     "Referer" to "https://loadm.cam/",
                     "User-Agent" to commonHeaders["User-Agent"]!!,
-                    "X-Requested-With" to "XMLHttpRequest",
-                    "Accept" to "*/*"
+                    "X-Requested-With" to "XMLHttpRequest"
                 ))
 
                 val body = apiRes.text
-                
-                // Cerchiamo il link sorgente master. Nota: può finire in .txt o .m3u8
                 val masterLink = Regex("""https?://[^\s"'<>]+cf-master\.[0-9]+\.txt""").find(body)?.value
                     ?: Regex("""https?://[^\s"'<>]+master\.m3u8[^\s"'<>]*""").find(body)?.value
-                    ?: Regex("""["']file["']\s*:\s*["']([^"']+)""").find(body)?.groupValues?.get(1)
 
                 if (masterLink != null) {
                     val cleanUrl = masterLink.replace("\\/", "/")
                     
+                    // SOLUZIONE COMPATIBILE STABLE:
+                    // Usiamo il costruttore classico di ExtractorLink senza il blocco 'headers' interno
+                    // che causa il crash su Stable. Passiamo il referer tramite la stringa.
                     callback.invoke(
                         ExtractorLink(
                             source = "LoadM",
-                            name = "LoadM (Auto)",
+                            name = "LoadM",
                             url = cleanUrl,
                             referer = "https://loadm.cam/",
                             quality = Qualities.Unknown.value,
-                            type = if (cleanUrl.contains(".m3u8") || cleanUrl.contains(".txt")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO,
-                            headers = mapOf(
-                                "Origin" to "https://loadm.cam",
-                                "Accept" to "*/*"
-                            )
+                            type = ExtractorLinkType.M3U8
                         )
                     )
                 }
-            } catch (e: Exception) {
-                // Errore silenzioso per passare ad altri estrattori
-            }
+            } catch (e: Exception) { }
         }
 
-        // 2. TENTATIVO ESTRATTORI STANDARD (Iframe e Link nel JS)
+        // Caricamento altri estrattori (standard)
         val doc = response.document
         doc.select("iframe").forEach { iframe ->
             val src = iframe.attr("src")
-            if (src.isNotEmpty() && !src.contains("google") && !src.contains("youtube")) {
+            if (src.isNotEmpty() && !src.contains("google")) {
                 loadExtractor(src, subtitleCallback, callback)
             }
-        }
-
-        val regex = Regex("""https?://(?:vidhide|voe|streamwish|mixdrop|filemoon|ryderjet|vood|embedwish)[^\s"'<>\\\/]+""")
-        regex.findAll(html).forEach { match ->
-            loadExtractor(match.value.replace("\\/", "/"), subtitleCallback, callback)
         }
 
         return true
