@@ -139,7 +139,11 @@ class CineblogProvider : MainAPI() {
         val doc = app.get(url).document
         val title = doc.selectFirst("h1")?.text()?.trim() ?: return null
         val poster = fixUrlNull(doc.selectFirst("img._player-cover, .story-poster img, img[itemprop='image']")?.attr("src"))
-        val plot = doc.selectFirst("meta[name='description']")?.attr("content")
+        
+        // MODIFICA TRAMA: Rimuove il testo dentro <strong> e pulisce i tag
+        val plotElement = doc.selectFirst(".story")
+        val strongText = plotElement?.selectFirst("strong")?.text() ?: ""
+        val plot = plotElement?.text()?.replace(strongText, "")?.replace("+Info»", "")?.trim()
 
         val seasonContainer = doc.selectFirst(".tt_season")
         return if (seasonContainer != null) {
@@ -184,7 +188,6 @@ class CineblogProvider : MainAPI() {
         links.forEach { link ->
             val fixedLink = fixUrl(link)
 
-            // --- Logica 1: Estrattori Custom Diretti (per Serie TV o link chiari) ---
             if (fixedLink.contains("dropload")) {
                 DroploadExtractor().getUrl(fixedLink, fixedLink, subtitleCallback, callback)
                 return@forEach
@@ -194,7 +197,6 @@ class CineblogProvider : MainAPI() {
                 return@forEach
             }
 
-            // --- Logica 2: La tua logica originale (per Film e Link Interni) ---
             if (fixedLink.startsWith("http") && !fixedLink.contains("cineblog001") && !fixedLink.contains("mostraguarda")) {
                 loadExtractor(fixedLink, fixedLink, subtitleCallback, callback)
             } else {
@@ -209,7 +211,6 @@ class CineblogProvider : MainAPI() {
                         val mirror = el.attr("data-link").ifEmpty { el.attr("src") }
                         if (mirror.isNotBlank() && !mirror.contains("mostraguarda.stream") && !mirror.contains("facebook") && !mirror.contains("google")) {
                             val finalMirror = fixUrl(mirror)
-                            // Controlliamo di nuovo se il mirror trovato è Dropload o Supervideo
                             when {
                                 finalMirror.contains("dropload") -> DroploadExtractor().getUrl(finalMirror, finalMirror, subtitleCallback, callback)
                                 finalMirror.contains("supervideo") -> SupervideoExtractor().getUrl(finalMirror, finalMirror, subtitleCallback, callback)
