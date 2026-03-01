@@ -16,29 +16,24 @@ class CineblogProvider : MainAPI() {
         val homePageList = mutableListOf<HomePageList>()
         val mainDoc = app.get(mainUrl).document
 
-        // 1. In Evidenza
         val featured = mainDoc.select(".promo-item, .m-item").mapNotNull { it.toSearchResult() }.distinctBy { it.url }
         if (featured.isNotEmpty()) homePageList.add(HomePageList("In Evidenza", featured))
 
-        // 2. Ultimi Aggiunti
         val latest = mainDoc.select(".block-th").mapNotNull { it.toSearchResult() }.distinctBy { it.url }
         if (latest.isNotEmpty()) homePageList.add(HomePageList("Ultimi Aggiunti", latest))
 
-        // 3. Serie TV
         try {
             val tvDoc = app.get("$mainUrl/serie-tv/").document
             val tvItems = tvDoc.select(".block-th, .movie-item").mapNotNull { it.toSearchResult() }.distinctBy { it.url }
             if (tvItems.isNotEmpty()) homePageList.add(HomePageList("Serie TV", tvItems))
         } catch (e: Exception) { }
 
-        // 4. Animazione
         try {
             val animDoc = app.get("$mainUrl/film/?genere=2").document
             val animItems = animDoc.select(".block-th, .movie-item").mapNotNull { it.toSearchResult() }.distinctBy { it.url }
             if (animItems.isNotEmpty()) homePageList.add(HomePageList("Animazione", animItems))
         } catch (e: Exception) { }
 
-        // 5. Azione
         try {
             val actionDoc = app.get("$mainUrl/film/?genere=1").document
             val actionItems = actionDoc.select(".block-th, .movie-item").mapNotNull { it.toSearchResult() }.distinctBy { it.url }
@@ -84,7 +79,6 @@ class CineblogProvider : MainAPI() {
 
         val img = this.selectFirst("img")
         val posterUrl = fixUrlNull(img?.attr("data-src")?.ifEmpty { img.attr("src") } ?: img?.attr("src"))
-        
         val isTv = href.contains("/serie-tv/") || this.selectFirst(".se_num") != null || title.contains("serie tv", true)
 
         return if (isTv) {
@@ -103,15 +97,14 @@ class CineblogProvider : MainAPI() {
         val posterElement = doc.selectFirst(".story-cover img, img[itemprop='image'], .story-poster img, .m-img img")
         val poster = fixUrlNull(posterElement?.attr("data-src")?.ifEmpty { posterElement.attr("src") } ?: posterElement?.attr("src"))
 
-        // --- SISTEMAZIONE TRAMA ---
+        // Pulizia Trama
         val storyEl = doc.selectFirst(".story.space-sm")
         val plot = if (storyEl != null) {
-            // Rimuoviamo il tag <strong> (titolo streaming inutile) e il link +Info
-            storyEl.select("strong, a").remove()
-            storyEl.text().trim()
+            val tempEl = storyEl.clone()
+            tempEl.select("strong, a").remove()
+            tempEl.text().trim()
         } else {
-            doc.selectFirst("meta[name='description']")?.attr("content") ?:
-            doc.selectFirst(".story-text, .m-desc")?.text()
+            doc.selectFirst("meta[name='description']")?.attr("content")
         }
 
         val seasonContainer = doc.selectFirst(".tt_season, .tt_series")
@@ -161,12 +154,17 @@ class CineblogProvider : MainAPI() {
     ): Boolean {
         data.split("|").forEach { link ->
             val cleanLink = fixUrl(link)
-            if (cleanLink.startsWith("http") && !cleanLink.contains("cineblog001")) {
+            
+            // Carica direttamente se è un link esterno (Dropload, Mixdrop, ecc)
+            if (cleanLink.startsWith("http") && !cleanLink.contains("cineblog001") && !cleanLink.contains("mostraguarda")) {
                 loadExtractor(cleanLink, mainUrl, subtitleCallback, callback)
             } else if (cleanLink.isNotBlank()) {
                 val doc = app.get(cleanLink).document
-                doc.select("iframe[src], a[data-link], li[data-link]").forEach { el ->
-                    val extracted = el.attr("data-link").ifEmpty { el.attr("src") }
+                
+                // Cerca l'iframe (come quello che mi hai inviato) e i vari link data-link
+                doc.select("iframe[src], a[data-link], li[data-link], div[data-link]").forEach { el ->
+                    val extracted = el.attr("src").ifEmpty { el.attr("data-link") }
+                    
                     if (extracted.startsWith("http") && !extracted.contains("mostraguarda")) {
                         loadExtractor(fixUrl(extracted), mainUrl, subtitleCallback, callback)
                     }
