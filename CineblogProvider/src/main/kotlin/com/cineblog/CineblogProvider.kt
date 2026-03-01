@@ -1,10 +1,77 @@
 package com.cineblog
 
 import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.utils.ExtractorLink
-import com.lagradost.cloudstream3.utils.loadExtractor
+import com.lagradost.cloudstream3.utils.*
+import com.lagradost.api.Log
 import org.jsoup.nodes.Element
 
+// --- ESTRATTORE DROPLOAD ---
+class DroploadExtractor : ExtractorApi() {
+    override var name = "Dropload"
+    override var mainUrl = "https://dropload.tv"
+    override val requiresReferer = false
+
+    override suspend fun getUrl(
+        url: String,
+        referer: String?,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        try {
+            val body = app.get(url).body.string()
+            val unpacked = getAndUnpack(body)
+            val videoUrl = Regex("""file\s*:\s*"([^"]+\.m3u8[^"]*)"""").find(unpacked)?.groupValues?.get(1)
+
+            videoUrl?.let {
+                callback.invoke(
+                    newExtractorLink(name, name, it, ExtractorLinkType.M3U8) {
+                        this.referer = url
+                        quality = Qualities.Unknown.value
+                    }
+                )
+            }
+        } catch (e: Exception) {
+            Log.e("Dropload", "Error: ${e.message}")
+        }
+    }
+}
+
+// --- ESTRATTORE SUPERVIDEO ---
+class SupervideoExtractor : ExtractorApi() {
+    override var name = "Supervideo"
+    override var mainUrl = "https://supervideo.cc"
+    override val requiresReferer = false
+
+    override suspend fun getUrl(
+        url: String,
+        referer: String?,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        try {
+            val response = app.get(url).body.string()
+            // Supervideo usa spesso script packer per nascondere il file m3u8 o mp4
+            val unpacked = getAndUnpack(response)
+            
+            // Cerca m3u8 o in alternativa il file diretto mp4
+            val videoUrl = Regex("""file\s*:\s*"([^"]+.(?:m3u8|mp4)[^"]*)"""")
+                .find(unpacked)?.groupValues?.get(1)
+
+            videoUrl?.let {
+                callback.invoke(
+                    newExtractorLink(name, name, it, if(it.contains("m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO) {
+                        this.referer = url
+                        quality = Qualities.Unknown.value
+                    }
+                )
+            }
+        } catch (e: Exception) {
+            Log.e("Supervideo", "Error: ${e.message}")
+        }
+    }
+}
+
+// --- PROVIDER CINEBLOG01 ---
 class CineblogProvider : MainAPI() {
     override var mainUrl = "https://cineblog001.autos"
     override var name = "Cineblog01"
@@ -35,29 +102,9 @@ class CineblogProvider : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val allResults = mutableListOf<SearchResponse>()
-        for (page in 1..5) {
-            try {
-                val pagedResults = app.post(
-                    "$mainUrl/index.php?do=search",
-                    data = mapOf(
-                        "do" to "search",
-                        "subaction" to "search",
-                        "search_start" to "$page",
-                        "full_search" to "0",
-                        "result_from" to "${(page - 1) * 20 + 1}",
-                        "story" to query
-                    )
-                ).document.select(".m-item, .movie-item, article").mapNotNull {
-                    it.toSearchResult()
-                }
-                if (pagedResults.isEmpty()) break
-                allResults.addAll(pagedResults)
-            } catch (e: Exception) {
-                break
-            }
-        }
-        return allResults.distinctBy { it.url }
+        return app.post("$mainUrl/index.php?do=search", data = mapOf(
+            "do" to "search", "subaction" to "search", "story" to query
+        )).document.select(".m-item, .movie-item, article").mapNotNull { it.toSearchResult() }.distinctBy { it.url }
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
@@ -65,16 +112,11 @@ class CineblogProvider : MainAPI() {
         val href = fixUrl(a.attr("href"))
         if (href.contains("/tags/") || href.contains("/category/")) return null
 
-        var title = this.selectFirst("h2, h3, .m-title")?.text() ?: a.attr("title").ifEmpty { a.text() }
-        
-        title = title.replace(Regex("""(?i)(\d+x\d+|Stagion[ei]\s+\d+|streaming)"""), "")
-                     .replace(Regex("""[\-\s,._/]+$"""), "").trim()
-
+        val title = this.selectFirst("h2, h3, .m-title")?.text() ?: a.attr("title")
         val img = this.selectFirst("img")
         val posterUrl = fixUrlNull(img?.attr("data-src") ?: img?.attr("src"))
-        val isTv = href.contains("/serie-tv/") || title.contains("serie tv", true)
-
-        return if (isTv) {
+        
+        return if (href.contains("/serie-tv/")) {
             newTvSeriesSearchResponse(title, href, TvType.TvSeries) { this.posterUrl = posterUrl }
         } else {
             newMovieSearchResponse(title, href, TvType.Movie) { this.posterUrl = posterUrl }
@@ -83,75 +125,38 @@ class CineblogProvider : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse? {
         val doc = app.get(url).document
-        
-        var title = doc.selectFirst("h1")?.text()?.trim() ?: return null
-        title = title.replace(Regex("""(?i)(\s+\d+x\d+.*|Stagion[ei]\s+\d+.*|streaming)"""), "")
-                     .replace(Regex("""[\-\s,._/]+$"""), "").trim()
-        
-        val poster = fixUrlNull(
-            doc.selectFirst("img._player-cover")?.attr("src") 
-            ?: doc.selectFirst(".story-poster img, .m-img img, img[itemprop='image']")?.attr("src")
-        )
-
-        var rawPlot = doc.selectFirst("meta[name='description']")?.attr("content") ?: ""
-        var cleanPlot = rawPlot.replace(Regex("""(?i).*?(?:streaming|treaming).*?(?:serie tv|film).*?(?:cb01|cineblog\d*01)\s*[,.:;\-–]*"""), "")
-                               .replace(Regex("""(?i)cineblog\d*01\s*[,.:;\-–]*"""), "")
-                               .replace(Regex("""(?i)cb01\s*[,.:;\-–]*"""), "")
-                               .replace(Regex("""^[\s,.:;–\-]+"""), "")
-                               .trim()
-
-        val half = cleanPlot.length / 2
-        if (half > 15) {
-            val firstHalf = cleanPlot.substring(0, half).trim()
-            val secondHalf = cleanPlot.substring(half).trim()
-            if (secondHalf.contains(firstHalf) || firstHalf.contains(secondHalf)) {
-                cleanPlot = firstHalf
-            }
-        }
+        val title = doc.selectFirst("h1")?.text()?.trim() ?: return null
+        val poster = fixUrlNull(doc.selectFirst("img._player-cover, .story-poster img, img[itemprop='image']")?.attr("src"))
+        val plot = doc.selectFirst("meta[name='description']")?.attr("content")
 
         val seasonContainer = doc.selectFirst(".tt_season")
-        
         return if (seasonContainer != null) {
             val episodesList = mutableListOf<Episode>()
-            val seasonPanes = doc.select(".tt_series .tab-content .tab-pane")
-            
-            seasonPanes.forEachIndexed { index, pane ->
+            doc.select(".tt_series .tab-content .tab-pane").forEachIndexed { index, pane ->
                 val seasonNum = index + 1
                 pane.select("li").forEach { li ->
                     val a = li.selectFirst("a[id^=serie-]") ?: return@forEach
-                    
-                    // Prendiamo il link principale E quelli nei mirror (come Dropload)
                     val mainLink = a.attr("data-link").ifEmpty { a.attr("href") }
                     val mirrors = li.select(".mirrors a.mr").map { it.attr("data-link") }
                     
-                    // Uniamo i link separandoli con una virgola o un carattere speciale 
-                    // per far sì che loadLinks possa leggerli tutti
                     val allLinks = (listOf(mainLink) + mirrors).filter { it.isNotBlank() }.joinToString("|")
-
-                    val dataNum = a.attr("data-num")
-                    val epNum = if (dataNum.contains("x")) {
-                        dataNum.substringAfter("x").toIntOrNull()
-                    } else {
-                        a.text().toIntOrNull()
-                    } ?: 1
+                    val epNum = a.text().toIntOrNull() ?: 1
 
                     episodesList.add(newEpisode(allLinks) {
                         this.name = "Episodio $epNum"
                         this.season = seasonNum
                         this.episode = epNum
-                        this.posterUrl = poster
                     })
                 }
             }
-
-            newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodesList.distinctBy { "${it.season}-${it.episode}" }) {
+            newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodesList) {
                 this.posterUrl = poster
-                this.plot = cleanPlot
+                this.plot = plot
             }
         } else {
             newMovieLoadResponse(title, url, TvType.Movie, url) {
                 this.posterUrl = poster
-                this.plot = cleanPlot
+                this.plot = plot
             }
         }
     }
@@ -162,28 +167,20 @@ class CineblogProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // Separiamo i mirror che abbiamo unito nel metodo load
-        val links = data.split("|")
-
-        links.forEach { link ->
-            if (link.startsWith("http") && !link.contains("cineblog001") && !link.contains("mostraguarda")) {
-                loadExtractor(link, link, subtitleCallback, callback)
-            } else {
-                val doc = app.get(fixUrl(link)).document
-                val realUrl = doc.selectFirst(".open-fake-url")?.attr("data-url")
-                    ?: doc.selectFirst("iframe[src*='mostraguarda']")?.attr("src")
-                    
-                val targetDoc = if (!realUrl.isNullOrBlank()) app.get(fixUrl(realUrl)).document else doc
-
-                targetDoc.select("li[data-link], a[data-link], a.mr, iframe#_player, iframe[src*='embed']").forEach { el ->
-                    val mirror = el.attr("data-link").ifEmpty { el.attr("src") }
-                    if (mirror.isNotBlank() && !mirror.contains("mostraguarda.stream") && !mirror.contains("facebook") && !mirror.contains("google")) {
-                        loadExtractor(fixUrl(mirror), link, subtitleCallback, callback)
-                    }
-                }
+        data.split("|").forEach { link ->
+            val fixedLink = fixUrl(link)
+            
+            when {
+                fixedLink.contains("dropload") -> 
+                    DroploadExtractor().getUrl(fixedLink, fixedLink, subtitleCallback, callback)
+                
+                fixedLink.contains("supervideo") -> 
+                    SupervideoExtractor().getUrl(fixedLink, fixedLink, subtitleCallback, callback)
+                
+                fixedLink.startsWith("http") && !fixedLink.contains("cineblog001") -> 
+                    loadExtractor(fixedLink, fixedLink, subtitleCallback, callback)
             }
         }
-
         return true
     }
 }
