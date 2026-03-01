@@ -73,6 +73,7 @@ class CineblogProvider : MainAPI() {
         if (latest.isNotEmpty()) homePageList.add(HomePageList("Ultimi Aggiunti", latest))
 
         val genres = listOf(
+            "Serie TV" to "$mainUrl/serie-tv/",
             "Azione" to "$mainUrl/film/?genere=1",
             "Animazione" to "$mainUrl/film/?genere=2",
             "Avventura" to "$mainUrl/film/?genere=3",
