@@ -6,7 +6,7 @@ import com.lagradost.api.Log
 import org.jsoup.nodes.Element
 
 // =============================================================================
-// ESTRATTORI DEDICATI (DROPLOAD & SUPERVIDEO)
+// ESTRATTORI DEDICATI
 // =============================================================================
 
 class DroploadExtractor : ExtractorApi() {
@@ -14,19 +14,28 @@ class DroploadExtractor : ExtractorApi() {
     override var mainUrl = "https://dropload.tv"
     override val requiresReferer = false
 
-    override suspend fun getUrl(url: String, referer: String?, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit) {
+    override suspend fun getUrl(
+        url: String,
+        referer: String?,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ) {
         try {
             val body = app.get(url).body.string()
             val unpacked = getAndUnpack(body)
             val videoUrl = Regex("""file\s*:\s*"([^"]+\.m3u8[^"]*)"""").find(unpacked)?.groupValues?.get(1)
 
             videoUrl?.let {
-                callback.invoke(newExtractorLink(name, name, it, ExtractorLinkType.M3U8) {
-                    this.referer = url
-                    quality = Qualities.Unknown.value
-                })
+                callback.invoke(
+                    newExtractorLink(name, name, it, ExtractorLinkType.M3U8) {
+                        this.referer = url
+                        quality = Qualities.Unknown.value
+                    }
+                )
             }
-        } catch (e: Exception) { Log.e("Dropload", "Error: ${e.message}") }
+        } catch (e: Exception) {
+            Log.e("Dropload", "Error: ${e.message}")
+        }
     }
 }
 
@@ -35,19 +44,30 @@ class SupervideoExtractor : ExtractorApi() {
     override var mainUrl = "https://supervideo.cc"
     override val requiresReferer = false
 
-    override suspend fun getUrl(url: String, referer: String?, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit) {
+    override suspend fun getUrl(
+        url: String,
+        referer: String?,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ) {
         try {
             val response = app.get(url).body.string()
             val unpacked = getAndUnpack(response)
-            val videoUrl = Regex("""file\s*:\s*"([^"]+.(?:m3u8|mp4)[^"]*)"""").find(unpacked)?.groupValues?.get(1)
+            
+            val videoUrl = Regex("""file\s*:\s*"([^"]+.(?:m3u8|mp4)[^"]*)"""")
+                .find(unpacked)?.groupValues?.get(1)
 
             videoUrl?.let {
-                callback.invoke(newExtractorLink(name, name, it, if(it.contains("m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO) {
-                    this.referer = url
-                    quality = Qualities.Unknown.value
-                })
+                callback.invoke(
+                    newExtractorLink(name, name, it, if(it.contains("m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO) {
+                        this.referer = url
+                        quality = Qualities.Unknown.value
+                    }
+                )
             }
-        } catch (e: Exception) { Log.e("Supervideo", "Error: ${e.message}") }
+        } catch (e: Exception) {
+            Log.e("Supervideo", "Error: ${e.message}")
+        }
     }
 }
 
@@ -65,69 +85,34 @@ class CineblogProvider : MainAPI() {
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
         val homePageList = mutableListOf<HomePageList>()
         val mainDoc = app.get(mainUrl).document
-        
-        // Sezioni Standard
+
         val featured = mainDoc.select(".promo-item, .m-item").mapNotNull { it.toSearchResult() }.distinctBy { it.url }
         if (featured.isNotEmpty()) homePageList.add(HomePageList("In Evidenza", featured))
 
         val latest = mainDoc.select(".block-th").mapNotNull { it.toSearchResult() }.distinctBy { it.url }
         if (latest.isNotEmpty()) homePageList.add(HomePageList("Ultimi Aggiunti", latest))
 
-        // Generi richiesti
-        val genres = listOf(
-            "Azione" to "$mainUrl/film/?genere=1",
-            "Animazione" to "$mainUrl/film/?genere=2",
-            "Avventura" to "$mainUrl/film/?genere=3",
-            "Famiglia" to "$mainUrl/film/?genere=26",
-            "Fantascienza" to "$mainUrl/film/?genere=9",
-            "Fantasy" to "$mainUrl/film/?genere=10",
-            "Horror" to "$mainUrl/film/?genere=13",
-            "Thriller" to "$mainUrl/film/?genere=19"
-        )
-
-        genres.forEach { (name, url) ->
-            try {
-                val items = app.get(url).document.select(".block-th").mapNotNull { it.toSearchResult() }.distinctBy { it.url }
-                if (items.isNotEmpty()) homePageList.add(HomePageList(name, items))
-            } catch (e: Exception) { }
-        }
+        try {
+            val tvDoc = app.get("$mainUrl/serie-tv/").document
+            val tvItems = tvDoc.select(".block-th, .movie-item").mapNotNull { it.toSearchResult() }.distinctBy { it.url }
+            if (tvItems.isNotEmpty()) homePageList.add(HomePageList("Serie TV", tvItems))
+        } catch (e: Exception) { }
 
         return newHomePageResponse(homePageList, false)
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val allResults = mutableListOf<SearchResponse>()
-        for (page in 1..5) {
-            try {
-                val pagedResults = app.post(
-                    "$mainUrl/index.php?do=search",
-                    data = mapOf(
-                        "do" to "search",
-                        "subaction" to "search",
-                        "search_start" to "$page",
-                        "full_search" to "0",
-                        "result_from" to "${(page - 1) * 20 + 1}",
-                        "story" to query
-                    )
-                ).document.select(".m-item, .movie-item, article, .block-th").mapNotNull {
-                    it.toSearchResult()
-                }
-                if (pagedResults.isEmpty()) break
-                allResults.addAll(pagedResults)
-            } catch (e: Exception) { break }
-        }
-        return allResults.distinctBy { it.url }
+        return app.post("$mainUrl/index.php?do=search", data = mapOf(
+            "do" to "search", "subaction" to "search", "story" to query
+        )).document.select(".m-item, .movie-item, article").mapNotNull { it.toSearchResult() }.distinctBy { it.url }
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        val a = this.selectFirst(".block-th-haeding a, a") ?: return null
+        val a = this.selectFirst("a") ?: return null
         val href = fixUrl(a.attr("href"))
         if (href.contains("/tags/") || href.contains("/category/")) return null
 
-        val title = a.text().trim().ifEmpty { 
-            this.selectFirst("h2, h3, .m-title, .block-th-haeding")?.text() ?: a.attr("title") 
-        }
-        
+        val title = this.selectFirst("h2, h3, .m-title")?.text() ?: a.attr("title")
         val img = this.selectFirst("img")
         val posterUrl = fixUrlNull(img?.attr("data-src") ?: img?.attr("src"))
         
@@ -161,7 +146,7 @@ class CineblogProvider : MainAPI() {
                         this.name = "Episodio $epNum"
                         this.season = seasonNum
                         this.episode = epNum
-                        this.posterUrl = poster
+                        this.posterUrl = poster // Anteprima episodio impostata
                     })
                 }
             }
@@ -177,13 +162,24 @@ class CineblogProvider : MainAPI() {
         }
     }
 
-    override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
+    override suspend fun loadLinks(
+        data: String,
+        isCasting: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
         data.split("|").forEach { link ->
             val fixedLink = fixUrl(link)
+            
             when {
-                fixedLink.contains("dropload") -> DroploadExtractor().getUrl(fixedLink, fixedLink, subtitleCallback, callback)
-                fixedLink.contains("supervideo") -> SupervideoExtractor().getUrl(fixedLink, fixedLink, subtitleCallback, callback)
-                fixedLink.startsWith("http") && !fixedLink.contains("cineblog001") -> loadExtractor(fixedLink, fixedLink, subtitleCallback, callback)
+                fixedLink.contains("dropload") -> 
+                    DroploadExtractor().getUrl(fixedLink, fixedLink, subtitleCallback, callback)
+                
+                fixedLink.contains("supervideo") -> 
+                    SupervideoExtractor().getUrl(fixedLink, fixedLink, subtitleCallback, callback)
+                
+                fixedLink.startsWith("http") && !fixedLink.contains("cineblog001") -> 
+                    loadExtractor(fixedLink, fixedLink, subtitleCallback, callback)
             }
         }
         return true
