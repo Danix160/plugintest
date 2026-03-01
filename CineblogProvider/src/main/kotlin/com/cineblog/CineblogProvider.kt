@@ -140,10 +140,15 @@ class CineblogProvider : MainAPI() {
         val title = doc.selectFirst("h1")?.text()?.trim() ?: return null
         val poster = fixUrlNull(doc.selectFirst("img._player-cover, .story-poster img, img[itemprop='image']")?.attr("src"))
         
-        // MODIFICA TRAMA: Rimuove il testo dentro <strong> e pulisce i tag
+        // MODIFICA TRAMA: Rimuove titolo, Info, e pulisce la virgola iniziale
         val plotElement = doc.selectFirst(".story")
         val strongText = plotElement?.selectFirst("strong")?.text() ?: ""
-        val plot = plotElement?.text()?.replace(strongText, "")?.replace("+Info»", "")?.trim()
+        val plot = plotElement?.text()
+            ?.replace(strongText, "")
+            ?.replace("+Info»", "")
+            ?.trim()
+            ?.removePrefix(",") // Rimuove la virgola brutta all'inizio
+            ?.trim()
 
         val seasonContainer = doc.selectFirst(".tt_season")
         return if (seasonContainer != null) {
