@@ -5,7 +5,10 @@ import com.lagradost.cloudstream3.utils.*
 import com.lagradost.api.Log
 import org.jsoup.nodes.Element
 
-// --- ESTRATTORE DROPLOAD ---
+// =============================================================================
+// ESTRATTORI DEDICATI
+// =============================================================================
+
 class DroploadExtractor : ExtractorApi() {
     override var name = "Dropload"
     override var mainUrl = "https://dropload.tv"
@@ -36,7 +39,6 @@ class DroploadExtractor : ExtractorApi() {
     }
 }
 
-// --- ESTRATTORE SUPERVIDEO ---
 class SupervideoExtractor : ExtractorApi() {
     override var name = "Supervideo"
     override var mainUrl = "https://supervideo.cc"
@@ -50,10 +52,8 @@ class SupervideoExtractor : ExtractorApi() {
     ) {
         try {
             val response = app.get(url).body.string()
-            // Supervideo usa spesso script packer per nascondere il file m3u8 o mp4
             val unpacked = getAndUnpack(response)
             
-            // Cerca m3u8 o in alternativa il file diretto mp4
             val videoUrl = Regex("""file\s*:\s*"([^"]+.(?:m3u8|mp4)[^"]*)"""")
                 .find(unpacked)?.groupValues?.get(1)
 
@@ -71,7 +71,10 @@ class SupervideoExtractor : ExtractorApi() {
     }
 }
 
-// --- PROVIDER CINEBLOG01 ---
+// =============================================================================
+// PROVIDER PRINCIPALE: CINEBLOG01
+// =============================================================================
+
 class CineblogProvider : MainAPI() {
     override var mainUrl = "https://cineblog001.autos"
     override var name = "Cineblog01"
@@ -83,15 +86,12 @@ class CineblogProvider : MainAPI() {
         val homePageList = mutableListOf<HomePageList>()
         val mainDoc = app.get(mainUrl).document
 
-        // In Evidenza
         val featured = mainDoc.select(".promo-item, .m-item").mapNotNull { it.toSearchResult() }.distinctBy { it.url }
         if (featured.isNotEmpty()) homePageList.add(HomePageList("In Evidenza", featured))
 
-        // Ultimi Aggiunti
         val latest = mainDoc.select(".block-th").mapNotNull { it.toSearchResult() }.distinctBy { it.url }
         if (latest.isNotEmpty()) homePageList.add(HomePageList("Ultimi Aggiunti", latest))
 
-        // Serie TV
         try {
             val tvDoc = app.get("$mainUrl/serie-tv/").document
             val tvItems = tvDoc.select(".block-th, .movie-item").mapNotNull { it.toSearchResult() }.distinctBy { it.url }
@@ -146,6 +146,7 @@ class CineblogProvider : MainAPI() {
                         this.name = "Episodio $epNum"
                         this.season = seasonNum
                         this.episode = epNum
+                        this.posterUrl = poster // Anteprima episodio impostata
                     })
                 }
             }
